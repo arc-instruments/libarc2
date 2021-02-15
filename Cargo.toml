@@ -1,0 +1,18 @@
+[package]
+name = "libarc2"
+version = "0.1.0"
+authors = ["Spyros Stathopoulos <spyros@arc-instruments.co.uk>"]
+edition = "2018"
+
+[lib]
+name = "libarc2"
+
+[dependencies]
+ndarray = "0.14"
+
+[dependencies.beastlink]
+path = "../beastlink-rs"
+version = "0.1"
+
+[dev-dependencies]
+serial_test = "0.4"

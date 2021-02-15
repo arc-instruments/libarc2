@@ -1,0 +1,9 @@
+target/*
+*Cargo.lock*
+*.swp
+*.so
+*.a
+*.la
+*.lo
+*.o
+./*.lib
