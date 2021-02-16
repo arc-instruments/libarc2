@@ -9,6 +9,7 @@ name = "libarc2"
 
 [dependencies]
 ndarray = "0.14"
+bitvec = "0.21"
 
 [dependencies.beastlink]
 path = "../beastlink-rs"
