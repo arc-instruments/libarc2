@@ -84,6 +84,21 @@ impl Instrument {
         self.write_packet(&packet)
     }
 
+    pub fn load_dacs(&self) -> Result<(), String> {
+        let packet: [u32; 8] = [
+            0x0000_0002, // opcode 0x2
+            0x0000_0000, // unused
+            0x0000_0000, // unused
+            0x0000_0000, // unused
+            0x0000_0000, // unused
+            0x0000_0000, // unused
+            0x0000_0000, // unused
+            0x0000_0000  // unused
+        ];
+
+        self.write_packet(&packet)
+    }
+
     /*pub fn make_buffer(&self, len: u32) -> Array<u32, Ix1> {
         let mut arr = Array::<u32, Ix1>::zeros(len as usize);
         arr[0]= 5u32;
