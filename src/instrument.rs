@@ -44,26 +44,34 @@ impl Instrument {
             return Err(String::from("Invalid packet length; must be N×8×(u32)"));
         }
 
-        // Each value is 4 bytes. We need an additional u32 every 8 × u32 of the
-        // input. So the total number of bytes is 4 × 9 × (length / 8), Instead
-        // of 4 × length
-        let mut packet: Vec<u8> = Vec::with_capacity(4*(9*(inlen/8)) as usize);
+        // This is the working packet; it's 8×u32 + padding = 9×u32. We need to
+        // write instructions 8+1 at a time from BASEADDR.
+        let mut wp: Vec<u8> = Vec::with_capacity(4*9 as usize);
 
         // split the u32s into 4 × BE u8s
         for (i, num) in in_packet.iter().enumerate() {
-            packet.extend_from_slice(&num.to_be_bytes());
+            wp.extend_from_slice(&num.to_be_bytes());
 
-            // padding bytes
             if i > 0 && (i+1) % 8 == 0 {
-                packet.extend_from_slice(&PADDINGU32.to_be_bytes());
+
+                // padding bytes
+                wp.extend_from_slice(&PADDINGU32.to_be_bytes());
+
+                // abort if a packet could not be written; on success wait WRITEDELAY ms
+                // before continuing and truncate the working packet back to 0
+                match self.efm.write_block(BASEADDR, &mut wp, bl::Flags::ConstAddress) {
+
+                    Ok(()) => {
+                        wp.truncate(0);
+                        thread::sleep(WRITEDELAY);
+                    },
+
+                    Err(err) => return Err(format!("Could not write buffer: {}", err))
+
+                }
+
             }
 
-            // abort if a packet could not be written, on success wait 3 ms
-            // before continuing
-            match self.efm.write_block(BASEADDR, &mut packet, bl::Flags::ConstAddress) {
-                Ok(()) => { thread::sleep(WRITEDELAY); },
-                Err(err) => return Err(format!("Could not write buffer: {}", err))
-            }
         }
 
         Ok(())
