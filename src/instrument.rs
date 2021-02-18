@@ -14,18 +14,29 @@ pub struct Instrument {
 
 
 impl Instrument {
+
     pub fn open(id: i32) -> Result<Instrument, String> {
+        let max_id = match bl::enumerate(EFM03_VID, EFM03_PID) {
+            Ok(v) => Ok(v),
+            Err(err) => Err(format!("Could not enumerate devices: {}", err))
+        }?;
+
+        if id > max_id {
+            return Err(format!("Invalid id for device {} > {}", id, max_id));
+        }
+
         match bl::Device::open(id) {
             Ok(d) => Ok(Instrument { efm: d }),
             Err(err) => Err(format!("Could not open device: {}", err))
         }
     }
 
-    pub fn find() -> Result<i32, String> {
-        match bl::enumerate(EFM03_VID, EFM03_PID) {
-            Ok(v) => Ok(v),
-            Err(err) => Err(format!("Could not enumerate devices: {}", err))
-        }
+    pub fn open_with_fw(id: i32, path: &str) -> Result<Instrument, String> {
+        let instr = Instrument::open(id)?;
+        instr.load_firmware(&path)?;
+        instr.reset_dacs()?;
+
+        Ok(instr)
     }
 
     pub fn load_firmware(&self, path: &str) -> Result<(), String> {
@@ -67,11 +78,8 @@ impl Instrument {
                     },
 
                     Err(err) => return Err(format!("Could not write buffer: {}", err))
-
                 }
-
             }
-
         }
 
         Ok(())
