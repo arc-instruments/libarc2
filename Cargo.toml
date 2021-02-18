@@ -10,6 +10,8 @@ name = "libarc2"
 [dependencies]
 ndarray = "0.14"
 bitvec = "0.21"
+num-derive = "0.3"
+num-traits = "0.2"
 
 [dependencies.beastlink]
 path = "../beastlink-rs"
@@ -17,3 +19,4 @@ version = "0.1"
 
 [dev-dependencies]
 serial_test = "0.4"
+assert_matches = "1.5"
