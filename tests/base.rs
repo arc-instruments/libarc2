@@ -1,6 +1,7 @@
 use libarc2;
 use std::env;
 use serial_test::serial;
+use assert_matches::assert_matches;
 
 
 #[test]
@@ -91,4 +92,23 @@ fn reset_dacs() {
         Ok(_) => { println!("RESET_DAC buffer written succesfully") }
         Err(err) => { panic!("Could not write RESET_DAC buffer: {}", err) }
     }
+}
+
+#[test]
+fn channel_conf() {
+    let mut v = libarc2::ChannelConfRegister::new(64);
+    v.set_all(libarc2::ChannelConf::VoltArb);
+
+    for channel in &v {
+        assert_matches!(channel, libarc2::ChannelConf::VoltArb);
+    }
+
+    let slice = v.as_repr();
+
+    assert_eq!(slice[0], 0x92492492);
+    assert_eq!(slice[1], 0x49249249);
+    assert_eq!(slice[2], 0x24924924);
+    assert_eq!(slice[3], 0x92492492);
+    assert_eq!(slice[4], 0x49249249);
+    assert_eq!(slice[5], 0x24924924);
 }

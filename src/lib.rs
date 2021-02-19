@@ -1,7 +1,7 @@
 //use ndarray::{Array, Ix1};
 
 mod instrument;
-mod channelreg;
+mod registers;
 
-pub use crate::channelreg::*;
+pub use crate::registers::channelconf::*;
 pub use crate::instrument::*;
