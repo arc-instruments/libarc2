@@ -1,5 +1,337 @@
+/// Convert a value into a `Vec<u32>`.
+pub trait ToU32s {
+
+    /// Convert an object, typically a register, into a serialisable
+    /// vector of u32s. These are the values that are actually written
+    /// to the ArC2 buffer.
+    fn as_u32s(&self) -> Vec<u32>;
+}
+
+
+pub mod opcode {
+
+    use num_derive::{FromPrimitive, ToPrimitive};
+    use super::ToU32s;
+
+    /// Opcodes designate an ArC2 operation
+    ///
+    /// An [`OpCode`] is typically the first register in an ArC2 instruction
+    /// and may be followed by a series of arguments.
+    #[derive(Clone, Copy, FromPrimitive, ToPrimitive)]
+    #[repr(u32)]
+    pub enum OpCode {
+        /// Set a DAC configuration.
+        SetDAC         = 0x00000001,
+        /// Enable a DAC configuration previously set with [`OpCode::SetDAC`].
+        UpdateDAC      = 0x00000002,
+        /// Read Current operation.
+        CurrentRead    = 0x00000004,
+        /// Read voltage operation.
+        VoltageRead    = 0x00000008,
+        /// Set selector.
+        UpdateSelector = 0x00000010,
+        /// Set logic levels.
+        UpdateLogic    = 0x00000020,
+        /// Update channel configuration.
+        UpdateChannel  = 0x00000040,
+        /// Clear instrument buffer.
+        Clear          = 0x00000080,
+        /// Configure for high speed pulse operation.
+        HSPulseConfig  = 0x00000100,
+        /// Initiate a high speed pulse operation.
+        HSPulseStart   = 0x00000200,
+        /// Modify channel configuration.
+        ModifyChannel  = 0x00000400,
+        /// Set DAC Offsets (currently nop).
+        SetDACOffset   = 0x00001000
+    }
+
+    impl ToU32s for OpCode {
+        fn as_u32s(&self) -> Vec<u32> {
+            [*self as u32].to_vec()
+        }
+    }
+
+}
+
+
+pub mod empty {
+
+    use super::ToU32s;
+
+    /// An empty register, typically used to pad instructions
+    /// to full length.
+    ///
+    /// An [`Empty`] should never need to be invoked manually
+    /// as empty instructions are added appropriately
+    /// when an instruction is compiled.
+    pub struct Empty(u32);
+
+    impl Empty {
+        /// Create a new empty register
+        pub fn new() -> Empty {
+            Empty(0x0)
+        }
+    }
+
+    impl ToU32s for Empty {
+        fn as_u32s(&self) -> Vec<u32> {
+            [self.0].to_vec()
+        }
+    }
+
+}
+
+pub mod terminate {
+
+    use super::ToU32s;
+
+    /// Register used to terminate instructions.
+    ///
+    /// As with [`Empty`][`super::empty::Empty`] this should not need
+    /// to be invoked manually as it is typically compiled into
+    /// an instruction.
+    pub struct Terminate(u32);
+
+    impl Terminate {
+        pub fn new() -> Terminate {
+            Terminate(0x80008000)
+        }
+    }
+
+    impl ToU32s for Terminate {
+        fn as_u32s(&self) -> Vec<u32> {
+            [self.0].to_vec()
+        }
+    }
+
+
+}
+
+pub mod dacmask {
+    use super::ToU32s;
+    use bitflags::bitflags;
+
+    bitflags! {
+        /// DAC channel selection register.
+        ///
+        /// [`DACMask`] is used to create a suitable bitmask for a given
+        /// selection of channels. Output channels in ArC2 are organised
+        /// in 8 clusters and there is also an additional auxilliary DAC
+        /// used for internal configuration. Each cluster contains 8
+        /// possible channels that can be toggled up to a total of 64.
+        /// This is usually paired with the
+        /// [`OpCode::UpdateDAC`][`super::opcode::OpCode::UpdateDAC`]
+        /// opcode to set the voltages of a channel. All the DACs are
+        /// organised in halves so if one wants to address channel
+        /// 3 (zero-indexed) would have to toggle the bits that correspond
+        /// to DAC0; 1st half ([`DACMask::CH00_03`]), whereas for channel 29
+        /// that would have to be DAC3; 2nd half ([`DACMask::CH28_31`]).
+        ///
+        /// Although one can create a suitable bitmask manually this
+        /// implementation provides some convenient functions that can
+        /// be used instead of calculating which of 16 halves corresponds
+        /// to a given channel. This is abstracted away under functions
+        /// [`set_channel`][`DACMask::set_channel`] and
+        /// [`unset_channel`][`DACMask::unset_channel`].
+        ///
+        /// ## Example
+        /// ```
+        /// use libarc2::register::DACMask;
+        ///
+        /// // Create a new DAC bitmask
+        /// let mut mask = DACMask::NONE;
+        ///
+        /// clusters.set_channels(&[2, 3, 50, 61]);
+        ///
+        /// assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH48_51 |
+        ///     DACMask::CH60_63);
+        /// assert_eq!(clusters.as_u32(), 0x00009001);
+        /// clusters.set_channel(12);
+        /// assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH12_15 |
+        ///     DACMask::CH48_51 | DACMask::CH60_63);
+        /// assert_eq!(clusters.as_u32(), 0x00009009);
+        ///
+        /// clusters.unset_channel(61);
+        /// assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH12_15 |
+        ///     DACMask::CH48_51);
+        /// assert_eq!(clusters.as_u32(), 0x00001009);
+        ///
+        /// clusters.clear();
+        /// assert_eq!(clusters, DACMask::NONE);
+        /// assert_eq!(clusters.as_u32(), 0x0);
+        /// ```
+        pub struct DACMask: u32 {
+            /// No Flags; invalid state
+            const NONE    = 0b00000000000000000000000000000000;
+            /// DAC0; first half
+            const CH00_03 = 0b00000000000000000000000000000001;
+            /// DAC0; second half
+            const CH04_07 = 0b00000000000000000000000000000010;
+            /// DAC1; first half
+            const CH08_11 = 0b00000000000000000000000000000100;
+            /// DAC1; second half
+            const CH12_15 = 0b00000000000000000000000000001000;
+            /// DAC2; first half
+            const CH16_19 = 0b00000000000000000000000000010000;
+            /// DAC2; second half
+            const CH20_23 = 0b00000000000000000000000000100000;
+            /// DAC3; first half
+            const CH24_27 = 0b00000000000000000000000001000000;
+            /// DAC3; second half
+            const CH28_31 = 0b00000000000000000000000010000000;
+            /// DAC4; first half
+            const CH32_35 = 0b00000000000000000000000100000000;
+            /// DAC4; second half
+            const CH36_39 = 0b00000000000000000000001000000000;
+            /// DAC5; first half
+            const CH40_43 = 0b00000000000000000000010000000000;
+            /// DAC5; second half
+            const CH44_47 = 0b00000000000000000000100000000000;
+            /// DAC6; first half
+            const CH48_51 = 0b00000000000000000001000000000000;
+            /// DAC6; second half
+            const CH52_55 = 0b00000000000000000010000000000000;
+            /// DAC7; first half
+            const CH56_59 = 0b00000000000000000100000000000000;
+            /// DAC7; second half
+            const CH60_63 = 0b00000000000000001000000000000000;
+            /// AUX DAC0
+            const AUX0    = 0b00000000000000010000000000000000;
+            /// AUX DAC1
+            const AUX1    = 0b00000000000000100000000000000000;
+            /// All channels of DAC0
+            const DAC0    = Self::CH00_03.bits | Self::CH04_07.bits;
+            /// All channels of DAC1
+            const DAC1    = Self::CH08_11.bits | Self::CH12_15.bits;
+            /// All channels of DAC2
+            const DAC2    = Self::CH16_19.bits | Self::CH20_23.bits;
+            /// All channels of DAC3
+            const DAC3    = Self::CH24_27.bits | Self::CH28_31.bits;
+            /// All channels of DAC4
+            const DAC4    = Self::CH32_35.bits | Self::CH36_39.bits;
+            /// All channels of DAC5
+            const DAC5    = Self::CH40_43.bits | Self::CH44_47.bits;
+            /// All channels of DAC6
+            const DAC6    = Self::CH48_51.bits | Self::CH52_55.bits;
+            /// All channels of DAC7
+            const DAC7    = Self::CH56_59.bits | Self::CH60_63.bits;
+            /// All channels
+            const ALL = Self::CH00_03.bits | Self::CH04_07.bits |
+                        Self::CH08_11.bits | Self::CH12_15.bits |
+                        Self::CH16_19.bits | Self::CH20_23.bits |
+                        Self::CH24_27.bits | Self::CH28_31.bits |
+                        Self::CH32_35.bits | Self::CH36_39.bits |
+                        Self::CH40_43.bits | Self::CH44_47.bits |
+                        Self::CH48_51.bits | Self::CH52_55.bits |
+                        Self::CH56_59.bits | Self::CH60_63.bits;
+        }
+    }
+
+    const CHANMAP: [DACMask; 64] = [
+        DACMask::CH00_03, DACMask::CH00_03, DACMask::CH00_03, DACMask::CH00_03,
+        DACMask::CH04_07, DACMask::CH04_07, DACMask::CH04_07, DACMask::CH04_07,
+        DACMask::CH08_11, DACMask::CH08_11, DACMask::CH08_11, DACMask::CH08_11,
+        DACMask::CH12_15, DACMask::CH12_15, DACMask::CH12_15, DACMask::CH12_15,
+        DACMask::CH16_19, DACMask::CH16_19, DACMask::CH16_19, DACMask::CH16_19,
+        DACMask::CH20_23, DACMask::CH20_23, DACMask::CH20_23, DACMask::CH20_23,
+        DACMask::CH24_27, DACMask::CH24_27, DACMask::CH24_27, DACMask::CH24_27,
+        DACMask::CH28_31, DACMask::CH28_31, DACMask::CH28_31, DACMask::CH28_31,
+        DACMask::CH32_35, DACMask::CH32_35, DACMask::CH32_35, DACMask::CH32_35,
+        DACMask::CH36_39, DACMask::CH36_39, DACMask::CH36_39, DACMask::CH36_39,
+        DACMask::CH40_43, DACMask::CH40_43, DACMask::CH40_43, DACMask::CH40_43,
+        DACMask::CH44_47, DACMask::CH44_47, DACMask::CH44_47, DACMask::CH44_47,
+        DACMask::CH48_51, DACMask::CH48_51, DACMask::CH48_51, DACMask::CH48_51,
+        DACMask::CH52_55, DACMask::CH52_55, DACMask::CH52_55, DACMask::CH52_55,
+        DACMask::CH56_59, DACMask::CH56_59, DACMask::CH56_59, DACMask::CH56_59,
+        DACMask::CH60_63, DACMask::CH60_63, DACMask::CH60_63, DACMask::CH60_63
+    ];
+
+    impl DACMask {
+
+        /// Enable the specified channel.
+        pub fn set_channel(&mut self, chan: usize) {
+            self.set_channels(&[chan]);
+        }
+
+        /// Disable the specified channel.
+        pub fn unset_channel(&mut self, chan: usize) {
+            self.unset_channels(&[chan]);
+        }
+
+        /// Enable the specified channels.
+        pub fn set_channels(&mut self, chans: &[usize]) {
+            for c in chans {
+                *self |= CHANMAP[*c];
+            }
+        }
+
+        /// Disable the specified channels.
+        pub fn unset_channels(&mut self, chans: &[usize]) {
+            for c in chans {
+                *self &= !CHANMAP[*c];
+            }
+        }
+
+        /// Clear all channels. This is effectively [`DACMask::NONE`].
+        pub fn clear(&mut self) {
+            self.bits = 0;
+        }
+
+        /// Get the representation of this bitmas ask u32.
+        pub fn as_u32(&self) -> u32 {
+            u32::from(self)
+        }
+    }
+
+    impl From<&DACMask> for u32 {
+        fn from(clusters: &DACMask) -> u32 {
+            clusters.bits() as u32
+        }
+    }
+
+    impl ToU32s for DACMask {
+        fn as_u32s(&self) -> Vec<u32> {
+            [self.as_u32()].to_vec()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::DACMask;
+
+        #[test]
+        fn test_dac_mask() {
+
+            let mut clusters = DACMask::NONE;
+
+            clusters.set_channels(&[2, 3, 50, 61]);
+            assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH48_51 |
+                DACMask::CH60_63);
+            assert_eq!(clusters.as_u32(), 0x00009001);
+
+            clusters.set_channel(12);
+            assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH12_15 |
+                DACMask::CH48_51 | DACMask::CH60_63);
+            assert_eq!(clusters.as_u32(), 0x00009009);
+
+            clusters.unset_channel(61);
+            assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH12_15 |
+                DACMask::CH48_51);
+            assert_eq!(clusters.as_u32(), 0x00001009);
+
+            clusters.clear();
+            assert_eq!(clusters, DACMask::NONE);
+            assert_eq!(clusters.as_u32(), 0x0);
+
+        }
+    }
+
+}
+
 pub mod channelconf {
 
+    use super::ToU32s;
     use std::convert::TryFrom;
     use bitvec::prelude::{BitVec, Msb0, BitStore, BitSlice, bitarr};
     use num_derive::FromPrimitive;
@@ -7,12 +339,12 @@ pub mod channelconf {
 
     const CHANSIZE: usize = 3;
 
-    /// Different channel configurations currently
-    /// supported by ArC2. Use these with [`ChannelConfRegister`]
-    /// to control the behaviour of individual ArC2 channels.
+    /// Channel configurations currently supported by ArC2.
+    /// Use these with [`ChannelConf`] to control
+    /// individual ArC2 channels.
     #[derive(Clone, Copy, FromPrimitive, Debug)]
     #[repr(u8)]
-    pub enum ChannelConf {
+    pub enum ChannelState {
         /// Open channel; channel will not be connected
         /// to anything.
         Open = 0b001,
@@ -28,7 +360,7 @@ pub mod channelconf {
         HiSpeed = 0b110,
     }
 
-    impl ChannelConf {
+    impl ChannelState {
         fn as_bools(&self) -> [bool; CHANSIZE] {
 
             let mut bools: [bool; CHANSIZE] = [false; CHANSIZE];
@@ -40,7 +372,7 @@ pub mod channelconf {
             bools
         }
 
-        fn from_bools(bools: &[bool; CHANSIZE]) -> ChannelConf {
+        fn from_bools(bools: &[bool; CHANSIZE]) -> ChannelState {
             let mut bitarr = bitarr![Msb0, u8; 0; 8];
 
             for i in 0..CHANSIZE {
@@ -48,11 +380,11 @@ pub mod channelconf {
             }
 
             let value: [u8; 1] = bitarr.value();
-            ChannelConf::from_u8(value[0] as u8).unwrap()
+            ChannelState::from_u8(value[0] as u8).unwrap()
 
         }
 
-        fn from_bitslice(bools: &BitSlice<Msb0, u32>) -> Result<ChannelConf, String> {
+        fn from_bitslice(bools: &BitSlice<Msb0, u32>) -> Result<ChannelState, String> {
 
             let len: usize;
 
@@ -73,57 +405,61 @@ pub mod channelconf {
             }
 
             let value: [u8; 1] = bitarr.value();
-            Ok(ChannelConf::from_u8(value[0] as u8).unwrap())
+            Ok(ChannelState::from_u8(value[0] as u8).unwrap())
         }
 
     }
 
-    impl From<&[bool; CHANSIZE]> for ChannelConf {
-        fn from(bools: &[bool; CHANSIZE]) -> ChannelConf {
-            ChannelConf::from_bools(&bools)
+    impl From<&[bool; CHANSIZE]> for ChannelState {
+        fn from(bools: &[bool; CHANSIZE]) -> ChannelState {
+            ChannelState::from_bools(&bools)
         }
     }
 
-    impl TryFrom<&BitSlice<Msb0, u32>> for ChannelConf {
+    impl TryFrom<&BitSlice<Msb0, u32>> for ChannelState {
 
         type Error = String;
 
         fn try_from(v: &BitSlice<Msb0, u32>) -> Result<Self, Self::Error> {
-            ChannelConf::from_bitslice(v)
+            ChannelState::from_bitslice(v)
         }
     }
 
-    /// `ChannelConfRegister` contains the configuration of then channels for
-    /// a given operation. Currently it's built for 3 bits per channel for a
-    /// total of 64 channels (192-bits). The underlying implementation uses a
+    /// A set of DAC channel output configuration.
+    ///
+    /// A `ChannelConf` is currently designed for 3 bits per channel for
+    /// a total of 64 channels (192-bits). The underlying implementation uses a
     /// [`BitVec`][bitvec::vec::BitVec] storing MSB bits and backed by [`u32`]s.
     /// This matches the structure that ArC2 is expecting for the channel
-    /// configuration.
+    /// configuration. `ChannelConf` is typically paired with
+    /// [`OpCode::UpdateChannel`][`super::opcode::OpCode::UpdateChannel`].
     ///
-    /// To create a new register call [`ChannelConfRegister::new()`] with the
+    /// To create a new register call [`ChannelConf::new()`] with the
     /// desired number of channels. For typical ArC2 scenarios this should be 64.
     /// By default the register is populated with zeros (which is an invalid
     /// status for ArC2) and must be configured appropriately by setting the
-    /// invididual channels to a [`ChannelConf`] value. The register will take
+    /// invididual channels to a [`ChannelState`] value. The register will take
     /// care of flipping the correct bits in the internal representation in order
     /// to have a consistent 32bit representation.
     ///
-    /// **See also**: [`ChannelConf`] for the available channel configurations.
+    /// **See also**: [`ChannelState`] for the available channel configurations.
     ///
     /// ## Examples
     ///
     /// ```
-    /// // Initialise a new status register
-    /// let mut reg = ChannelConfRegister::new(64);
+    /// use libarc2::register::{ChannelConf, ChannelState, ToU32s};
+    ///
+    /// // Initialise a new channel configuration register
+    /// let mut reg = ChannelConf::new(64);
     ///
     /// // Number of allocated channels
     /// let nchan = reg.len();
     ///
     /// // Set channel 31 to High speed pulsing mode
-    /// reg.set(31, ChannelConf::HiSpeed);
+    /// reg.set(31, ChannelState::HiSpeed);
     ///
     /// // Set all channels to arbitrary voltage operation
-    /// reg.set_all(ChannelConf::VoltArb);
+    /// reg.set_all(ChannelState::VoltArb);
     ///
     /// // Traverse channels (non-consuming iterator)
     /// for channel in &reg {
@@ -138,29 +474,28 @@ pub mod channelconf {
     /// //  0x92492492
     /// //  0x49249249
     /// //  0x24924924
-    /// for value in reg.as_repr() {
+    /// for value in reg.as_u32s() {
     ///    println!("0x{:x}", value);
     /// }
-    ///
     /// ```
-    pub struct ChannelConfRegister {
+    pub struct ChannelConf {
         bits: BitVec<Msb0, u32>,
     }
 
-    impl ChannelConfRegister {
+    impl ChannelConf {
 
         /// Create a new register with the specified number of
         /// channels. This will be expanded to `CHANSIZE` × channels
         /// in the internal bit vector representation.
-        pub fn new(channels: usize) -> ChannelConfRegister {
+        pub fn new(channels: usize) -> ChannelConf {
             // CHANSIZE bits for each channel
             let vec: BitVec<Msb0, u32> = BitVec::repeat(false, channels*CHANSIZE);
 
-            ChannelConfRegister { bits: vec }
+            ChannelConf { bits: vec }
         }
 
-        /// Set a channel to a [`ChannelConf`] value
-        pub fn set(&mut self, idx: usize, val: ChannelConf) {
+        /// Set a channel to a [`ChannelState`] value
+        pub fn set(&mut self, idx: usize, val: ChannelState) {
             let bits = self.bits.as_mut_bitslice();
             let bools = val.as_bools();
 
@@ -169,11 +504,11 @@ pub mod channelconf {
             }
         }
 
-        /// Get the [`configuration`][`ChannelConf`] of a channel
-        pub fn get(&self, idx: usize) -> ChannelConf {
+        /// Get the [`state`][`ChannelState`] of a channel
+        pub fn get(&self, idx: usize) -> ChannelState {
             let v = &self.bits[idx*CHANSIZE..(idx+1)*CHANSIZE];
 
-            ChannelConf::try_from(v).unwrap()
+            ChannelState::try_from(v).unwrap()
         }
 
         /// Get the number of allocated channels
@@ -183,7 +518,7 @@ pub mod channelconf {
         }
 
         /// Set the status of all channels to the same value
-        pub fn set_all(&mut self, val: ChannelConf) {
+        pub fn set_all(&mut self, val: ChannelState) {
             let nchannels = self.len();
 
             for i in 0..nchannels {
@@ -192,27 +527,34 @@ pub mod channelconf {
         }
 
         /// Get the serialisable format of this register specified
-        /// as a slice whatever the internal representation is. This
+        /// as a slice of whatever the internal representation is. This
         /// is presently a [`u32`] as this is the size of words that
         /// ArC2 is expecting as input.
-        pub fn as_repr(&self) -> &[u32] {
+        pub fn as_slice(&self) -> &[u32] {
             self.bits.as_raw_slice()
         }
     }
 
+    impl ToU32s for ChannelConf {
+        fn as_u32s(&self) -> Vec<u32> {
+            let bits = self.bits.as_raw_slice();
+            bits.to_vec()
+        }
+    }
+
     #[doc(hidden)]
-    pub struct ChannelConfRegisterIterator<'a> {
-        register: &'a ChannelConfRegister,
+    pub struct ChannelConfIterator<'a> {
+        register: &'a ChannelConf,
         index: usize,
     }
 
-    impl<'a> IntoIterator for &'a ChannelConfRegister {
+    impl<'a> IntoIterator for &'a ChannelConf {
 
-        type Item = ChannelConf;
-        type IntoIter = ChannelConfRegisterIterator<'a>;
+        type Item = ChannelState;
+        type IntoIter = ChannelConfIterator<'a>;
 
         fn into_iter(self) -> Self::IntoIter {
-            ChannelConfRegisterIterator {
+            ChannelConfIterator {
                 register: self,
                 index: 0,
             }
@@ -220,11 +562,11 @@ pub mod channelconf {
 
     }
 
-    impl<'a> Iterator for ChannelConfRegisterIterator<'a> {
+    impl<'a> Iterator for ChannelConfIterator<'a> {
 
-        type Item = ChannelConf;
+        type Item = ChannelState;
 
-        fn next(&mut self) -> Option<ChannelConf> {
+        fn next(&mut self) -> Option<ChannelState> {
             if self.index >= self.register.len() {
                 return None;
             }
@@ -240,53 +582,54 @@ pub mod channelconf {
     #[cfg(test)]
     mod tests {
 
-        use crate::{ChannelConf, ChannelConfRegister};
+        use super::{ChannelConf, ChannelState};
+        use crate::registers::ToU32s;
         use assert_matches::assert_matches;
 
         #[test]
         fn get_channel() {
-            let mut v = ChannelConfRegister::new(64);
-            v.set(50, ChannelConf::VoltArb);
+            let mut v = ChannelConf::new(64);
+            v.set(50, ChannelState::VoltArb);
             let res = v.get(50);
-            assert_matches!(res, ChannelConf::VoltArb);
+            assert_matches!(res, ChannelState::VoltArb);
 
-            v.set(0, ChannelConf::Open);
+            v.set(0, ChannelState::Open);
             let res = v.get(0);
-            assert_matches!(res, ChannelConf::Open);
+            assert_matches!(res, ChannelState::Open);
 
-            v.set(63, ChannelConf::HiSpeed);
+            v.set(63, ChannelState::HiSpeed);
             let res = v.get(63);
-            assert_matches!(res, ChannelConf::HiSpeed);
+            assert_matches!(res, ChannelState::HiSpeed);
         }
 
         #[test]
         fn channel_len() {
-            let v = ChannelConfRegister::new(64);
+            let v = ChannelConf::new(64);
             assert_eq!(v.len(), 64);
         }
 
         #[test]
         fn bools_to_status() {
-            let status0 = ChannelConf::from(&[false, true, false]);
-            assert_matches!(status0, ChannelConf::CloseGND);
+            let status0 = ChannelState::from(&[false, true, false]);
+            assert_matches!(status0, ChannelState::CloseGND);
 
-            let status1 = ChannelConf::from(&[true, false, false]);
-            assert_matches!(status1, ChannelConf::VoltArb);
+            let status1 = ChannelState::from(&[true, false, false]);
+            assert_matches!(status1, ChannelState::VoltArb);
 
-            let status2 = ChannelConf::from(&[false, false, true]);
-            assert_matches!(status2, ChannelConf::Open);
+            let status2 = ChannelState::from(&[false, false, true]);
+            assert_matches!(status2, ChannelState::Open);
         }
 
         #[test]
         fn all_channel_test() {
-            let mut v = ChannelConfRegister::new(64);
-            v.set_all(ChannelConf::VoltArb);
+            let mut v = ChannelConf::new(64);
+            v.set_all(ChannelState::VoltArb);
 
             for channel in &v {
-                assert_matches!(channel, ChannelConf::VoltArb);
+                assert_matches!(channel, ChannelState::VoltArb);
             }
 
-            let slice = v.as_repr();
+            let slice = v.as_u32s();
 
             assert_eq!(slice[0], 0x92492492);
             assert_eq!(slice[1], 0x49249249);
@@ -294,6 +637,125 @@ pub mod channelconf {
             assert_eq!(slice[3], 0x92492492);
             assert_eq!(slice[4], 0x49249249);
             assert_eq!(slice[5], 0x24924924);
+        }
+    }
+
+}
+
+pub mod sourceconf {
+    use super::ToU32s;
+    use bitvec::prelude::{BitVec, Msb0, BitField};
+    use num_derive::{FromPrimitive, ToPrimitive};
+    use num_traits::{FromPrimitive};
+
+    /// Current source configuration.
+    ///
+    /// When a current source is in operation this enum
+    /// specifies its operation state and it is part of the
+    /// [`SourceConf`] register.
+    #[derive(Clone, Copy, FromPrimitive, ToPrimitive, Debug)]
+    #[repr(u8)]
+    pub enum CurrentSourceState {
+        /// Maintain current status (default)
+        Maintain   = 0b00000000,
+        /// Disconnect current source
+        Open       = 0b00000001,
+        /// Arbitrary voltage operation
+        VoltageArb = 0b00000010,
+        /// High speed pulse operation
+        HiSpeed    = 0b00000011
+    }
+
+
+    /// Output source configuration
+    ///
+    /// This register configures the status of the output source and
+    /// it's usually followed by a
+    /// [`ChannelConf`][`crate::register::ChannelConf`].
+    /// There are two things that are specified by this register. The
+    /// *output digipot* and the state of the *current source*.
+    pub struct SourceConf {
+        bits: BitVec<Msb0, u32>
+    }
+
+    impl SourceConf {
+
+        /// Create a new source configuration register. This will
+        /// initialise the digipot to a safe value (`0x1CD` or roughly
+        /// 11 kΩ).
+        pub fn new() -> SourceConf {
+            let mut vec: BitVec<Msb0, u32> = BitVec::repeat(false, 32);
+            let bits = vec.as_mut_bitslice();
+            bits[0..10].store(0x1CD as u16);
+
+            SourceConf { bits: vec }
+        }
+
+        /// Set digipot raw value. This is clamped between
+        /// 0x000 and 0x300 to keep the instrument safe.
+        pub fn set_digipot(&mut self, val: u16) {
+            let actual_val;
+            if val > 0x300 {
+                actual_val = 0x300;
+            } else {
+                actual_val = val;
+            }
+
+            let bits = self.bits.as_mut_bitslice();
+            bits[0..10].store(actual_val);
+        }
+
+        /// Get the current digipot raw value.
+        pub fn get_digipot(&self) -> u16 {
+            self.bits[0..10].load()
+        }
+
+        /// Set state output. See [`CurrentSourceState`] for possible
+        /// values.
+        pub fn set_cursource_state(&mut self, val: CurrentSourceState) {
+            self.bits[28..32].store(val as u8);
+        }
+
+        /// Retrieves the current source state stores in this register.
+        pub fn get_cursource_state(&self) -> CurrentSourceState {
+            let val = self.bits[24..32].load::<u8>();
+            CurrentSourceState::from_u8(val).unwrap()
+        }
+    }
+
+    impl ToU32s for SourceConf {
+        fn as_u32s(&self) -> Vec<u32> {
+            let bits = self.bits.as_raw_slice();
+            bits.to_vec()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+
+        use super::{SourceConf, CurrentSourceState, ToU32s};
+        use assert_matches::assert_matches;
+
+        #[test]
+        fn test_sourceconf() {
+            let mut c = SourceConf::new();
+            c.set_digipot(0x200);
+            assert_eq!(c.get_digipot(), 0x200);
+
+            let slice = c.as_u32s();
+            assert_eq!(slice[0], 0x80000000);
+
+            c.set_cursource_state(CurrentSourceState::HiSpeed);
+            assert_matches!(c.get_cursource_state(),
+                CurrentSourceState::HiSpeed);
+
+            let slice = c.as_u32s();
+            assert_eq!(slice[0], 0x80000003);
+
+            // Digipot must never exceed 0x300
+            c.set_digipot(0x400);
+            assert_eq!(c.get_digipot(), 0x300);
+
         }
     }
 }

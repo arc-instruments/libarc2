@@ -96,14 +96,17 @@ fn reset_dacs() {
 
 #[test]
 fn channel_conf() {
-    let mut v = libarc2::ChannelConfRegister::new(64);
-    v.set_all(libarc2::ChannelConf::VoltArb);
+
+    use libarc2::register::{ChannelConf, ChannelState, ToU32s};
+
+    let mut v = ChannelConf::new(64);
+    v.set_all(ChannelState::VoltArb);
 
     for channel in &v {
-        assert_matches!(channel, libarc2::ChannelConf::VoltArb);
+        assert_matches!(channel, ChannelState::VoltArb);
     }
 
-    let slice = v.as_repr();
+    let slice = v.as_u32s();
 
     assert_eq!(slice[0], 0x92492492);
     assert_eq!(slice[1], 0x49249249);
