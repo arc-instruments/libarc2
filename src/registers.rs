@@ -759,3 +759,169 @@ pub mod sourceconf {
         }
     }
 }
+
+pub mod dacvoltage {
+
+    use super::ToU32s;
+
+    /*macro_rules! vidx {
+        ($val:expr, $offset:expr, $slope:expr) => {
+            match ((($val + $offset)/($slope)) as f64).round() {
+                c if c < 0.0 => 0u16,
+                c if c > 65535.0 => 0xFFFFu16,
+                c => c as u16
+            }
+        };
+
+        ($val:expr) => {
+            vidx!($val, 10.0, 3.05179e-4)
+        }
+    }*/
+
+    const ZERO: u32 = 0x80008000;
+
+    /// Voltage configuration for DACs
+    ///
+    /// This struct is used to configure the output voltages of the on-board
+    /// DACs. DAC voltage are represented with a `u16` value, `0x0000` being
+    /// the lowest possible voltage and `0xFFFF` being the highest. Assuming
+    /// the absolute maximum voltages are the same for two polarities value
+    /// `0x8000` is 0.0 volts which is the default value used when creating
+    /// this register.
+    ///
+    /// DACs have two outputs, Vhigh and Vlow and typically Vhigh > Vlow in
+    /// most circumstances. In normal measurement scenarios both output
+    /// voltages should be the same and the user is advised to use the
+    /// [`DACVoltage::set()`] function to set a voltage for a DAC. By
+    /// default a new `DACVoltage` has four different channels as this
+    /// is exactly the number of channels that fit in 1/2 of a DAC cluster.
+    /// See documentation of [`DACMask`][`crate::register::DACMask`] for
+    /// more details on that.
+    ///
+    /// ## Examples
+    /// ```
+    /// // Make a new register
+    /// let mut reg0 = DACVoltage::new();
+    /// // Set both values of the second channel
+    /// reg0.set(1, 0x8534);
+    /// assert_eq!(reg0.get(1), (0x8534, 0x8534));
+    ///
+    /// let mut reg1 = DACVoltage::new();
+    /// // Set the high voltage of the third channel
+    /// reg1.set_high(2, 0x8534);
+    /// assert_eq!(reg1.get(2), (0x8000, 0x8534));
+    /// ```
+    pub struct DACVoltage {
+        values: Vec<u32>
+    }
+
+    impl DACVoltage {
+
+        /// Create a new register with four channels
+        pub fn new() -> DACVoltage {
+            DACVoltage::new_with_size(4)
+        }
+
+        fn new_with_size(size: usize) -> DACVoltage {
+            let mut vec: Vec<u32> = Vec::with_capacity(size);
+
+            for _ in 0..size {
+                vec.push(ZERO);
+            }
+
+            DACVoltage { values: vec }
+        }
+
+        /// Set the Vhigh value of a specified channel index
+        pub fn set_high(&mut self, idx: usize, voltage: u16) {
+            self.values[idx] = (voltage as u32) << 16 |
+                (self.values[idx] & 0xFFFF);
+        }
+
+        /// Get the Vhigh value of a specified channel index
+        pub fn get_high(&self, idx: usize) -> u16 {
+            ((self.values[idx] & 0xFFFF0000) >> 16) as u16
+        }
+
+        /// Set the Vlow value of a specified channel index
+        pub fn set_low(&mut self, idx: usize, voltage: u16) {
+            self.values[idx] |= voltage as u32;
+        }
+
+        /// Get the Vlow value of a specified channel index
+        pub fn get_low(&self, idx: usize) -> u16 {
+            (self.values[idx] & 0xFFFF) as u16
+        }
+
+        /// Set both Vhigh and Vlow of a specified channel index
+        pub fn set(&mut self, idx: usize, voltage: u16) {
+            self.set_low(idx, voltage);
+            self.set_high(idx, voltage);
+        }
+
+        /// Get both Vhigh and Vlow of a specified channel index.
+        /// The first `u16` of the tuple is Vlow, the second Vhigh.
+        pub fn get(&self, idx: usize) -> (u16, u16) {
+            (self.get_low(idx), self.get_high(idx))
+        }
+
+        /// Number of configured channels
+        pub fn len(&self) -> usize {
+            self.values.len()
+        }
+
+    }
+
+    impl ToU32s for DACVoltage {
+        fn as_u32s(&self) -> Vec<u32> {
+            self.values.clone()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+
+        use super::{DACVoltage};
+
+        #[test]
+        fn dacvoltage_new() {
+            let v = DACVoltage::new();
+            for value in v.values {
+                assert_eq!(value, 0x80008000);
+            }
+        }
+
+        #[test]
+        fn dacvoltage_set_high() {
+            let mut v = DACVoltage::new();
+            v.set_high(3, 0xA0A0);
+
+            assert_eq!(v.values[3], 0xA0A08000);
+            assert_eq!(v.get_high(3), 0xA0A0);
+            assert_eq!(v.get_low(3), 0x8000);
+        }
+
+        #[test]
+        fn dacvoltage_set_low() {
+            let mut v = DACVoltage::new();
+            v.set_low(2, 0x90F3);
+
+            assert_eq!(v.values[2], 0x800090F3);
+            assert_eq!(v.get_high(2), 0x8000);
+            assert_eq!(v.get_low(2), 0x90F3);
+        }
+
+        #[test]
+        fn dacvoltage_set_both() {
+            let mut v = DACVoltage::new();
+
+            v.set(1, 0x8534);
+            assert_eq!(v.values[1], 0x85348534);
+            assert_eq!(v.get_low(1), 0x8534);
+            assert_eq!(v.get_high(1), 0x8534);
+            assert_eq!(v.get(1), (0x8534, 0x8534));
+        }
+
+    }
+
+}
