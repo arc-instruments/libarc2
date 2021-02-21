@@ -18,6 +18,7 @@ pub mod register {
     pub use crate::registers::terminate::Terminate;
     pub use crate::registers::empty::Empty;
     pub use crate::registers::dacmask::DACMask;
+    pub use crate::registers::adcmask::ADCMask;
     pub use crate::registers::dacvoltage::DACVoltage;
     pub use crate::registers::sourceconf::*;
 

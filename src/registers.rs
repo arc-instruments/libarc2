@@ -925,3 +925,155 @@ pub mod dacvoltage {
     }
 
 }
+
+pub mod adcmask {
+
+    use super::ToU32s;
+    use bitvec::prelude::{BitVec, Msb0};
+
+
+    /// Measurement channel configuration.
+    ///
+    /// An `ADCMask` is used to configure the measurement channels. Essentially
+    /// it defines which channels the Read Current or Read Voltage operation be
+    /// applied.
+    ///
+    /// ## Example
+    /// ```
+    /// use libarc2::register::ADCMask;
+    ///
+    /// // Standard ArC2 configuration has 64 channels
+    /// let mut chan = ADCMask::new(64);
+    ///
+    /// // set some channels
+    /// chan.set_enabled(31, true);
+    /// chan.set_enabled(0, true);
+    /// chan.set_enabled(62, true);
+    ///
+    /// assert_eq!(chan.get_enabled(31), true);
+    ///
+    /// // u32 representation
+    /// assert_eq!(&v.as_u32s(), &[0x40000000, 0x80000001]);
+    /// ```
+    pub struct ADCMask {
+        bits: BitVec<Msb0, u32>,
+    }
+
+
+    impl ADCMask {
+
+        /// Initialise a new ADC mask. Number of channels can be configurable
+        /// although ArC2 uses 64 channels for ADC inputs, same as the DACs.
+        pub fn new(channels: usize) -> ADCMask {
+            let vec: BitVec<Msb0, u32> = BitVec::repeat(false, channels);
+            ADCMask { bits: vec }
+        }
+
+        /// Set a channel to enabled (`true`) or disabled (`false`).
+        pub fn set_enabled(&mut self, idx: usize, status: bool) {
+            let len = self.bits.len();
+            let bits = self.bits.as_mut_bitslice();
+            bits.set(len-1-idx, status)
+        }
+
+        /// Get the state of a channel, enabled (`true`) or disabled (`false`).
+        pub fn get_enabled(&self, idx: usize) -> bool {
+            let len = self.bits.len();
+            self.bits[len-1-idx]
+        }
+
+        /// Get the number of allocated channels.
+        pub fn len(&self) -> usize {
+            self.bits.len()
+        }
+
+        /// Set all channels to enabled (`true`) or disabled (`false`).
+        pub fn set_enabled_all(&mut self, status: bool) {
+            let len = self.bits.len();
+            let bits = self.bits.as_mut_bitslice();
+            for i in 0..len {
+                bits.set(len-1-i, status)
+            }
+        }
+
+        /// Toggle selected channel.
+        pub fn toggle(&mut self, idx: usize) {
+            self.set_enabled(idx, !self.get_enabled(idx));
+        }
+
+        /// Get the serialisable format of this register specified
+        /// as a slice of whatever the internal representation is. This
+        /// is presently a [`u32`] as this is the size of words that
+        /// ArC2 is expecting as input.
+        pub fn as_slice(&self) -> &[u32] {
+            self.bits.as_raw_slice()
+        }
+
+    }
+
+    impl ToU32s for ADCMask {
+        fn as_u32s(&self) -> Vec<u32> {
+            self.bits.as_raw_slice().to_vec()
+        }
+    }
+
+
+    #[cfg(test)]
+    mod tests {
+        use super::ADCMask;
+        use crate::registers::ToU32s;
+
+        #[test]
+        fn get_set_channel() {
+            let mut v = ADCMask::new(64);
+            v.set_enabled(31, true);
+            v.set_enabled(0, true);
+            v.set_enabled(62, true);
+
+            assert_eq!(v.get_enabled(31), true);
+            assert_eq!(v.get_enabled(0), true);
+            assert_eq!(v.get_enabled(62), true);
+
+            v.set_enabled(62, false);
+            assert_eq!(v.get_enabled(62), false);
+
+        }
+
+        #[test]
+        fn get_set_all_channels() {
+            let mut v = ADCMask::new(64);
+            v.set_enabled_all(true);
+
+            for c in 0..v.len() {
+                assert_eq!(v.get_enabled(c), true);
+            }
+
+        }
+
+        #[test]
+        fn repr() {
+            let mut v = ADCMask::new(64);
+            v.set_enabled(31, true);
+            v.set_enabled(0, true);
+            v.set_enabled(62, true);
+
+            assert_eq!(&v.as_u32s(), &[0x40000000, 0x80000001]);
+
+        }
+
+        #[test]
+        fn toggle() {
+            let mut v = ADCMask::new(64);
+            v.set_enabled(31, true);
+            v.set_enabled(0, true);
+            v.set_enabled(62, true);
+
+            assert_eq!(v.get_enabled(31), true);
+
+            v.toggle(31);
+            assert_eq!(v.get_enabled(31), false);
+        }
+
+    }
+
+}
