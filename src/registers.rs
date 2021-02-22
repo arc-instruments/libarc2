@@ -140,7 +140,7 @@ pub mod dacmask {
         /// use libarc2::register::DACMask;
         ///
         /// // Create a new DAC bitmask
-        /// let mut mask = DACMask::NONE;
+        /// let mut clusters = DACMask::NONE;
         ///
         /// clusters.set_channels(&[2, 3, 50, 61]);
         ///
@@ -800,6 +800,8 @@ pub mod dacvoltage {
     ///
     /// ## Examples
     /// ```
+    /// use libarc2::register::DACVoltage;
+    ///
     /// // Make a new register
     /// let mut reg0 = DACVoltage::new();
     /// // Set both values of the second channel
@@ -940,7 +942,7 @@ pub mod adcmask {
     ///
     /// ## Example
     /// ```
-    /// use libarc2::register::ADCMask;
+    /// use libarc2::register::{ADCMask, ToU32s};
     ///
     /// // Standard ArC2 configuration has 64 channels
     /// let mut chan = ADCMask::new(64);
@@ -953,7 +955,7 @@ pub mod adcmask {
     /// assert_eq!(chan.get_enabled(31), true);
     ///
     /// // u32 representation
-    /// assert_eq!(&v.as_u32s(), &[0x40000000, 0x80000001]);
+    /// assert_eq!(chan.as_u32s(), &[0x40000000, 0x80000001]);
     /// ```
     pub struct ADCMask {
         bits: BitVec<Msb0, u32>,
