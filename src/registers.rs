@@ -1141,5 +1141,91 @@ pub mod adcmask {
         }
 
     }
+}
 
+pub mod iomask {
+
+    use super::u32mask::{Wx1, U32Mask};
+
+
+    /// I/O channel configuration bitmask.
+    ///
+    /// An `IOMask` is used to configure the I/O channels of ArC2. Essentially
+    /// it defines which channels will be configured during the Update I/O
+    /// instruction.
+    ///
+    /// See [`U32Mask`][`crate::register::U32Mask`] for details and
+    /// methods.
+    ///
+    /// ## Example
+    /// ```
+    /// use libarc2::register::{IOMask, ToU32s};
+    ///
+    /// let mut chan = IOMask::new();
+    ///
+    /// // set some channels
+    /// chan.set_enabled(31, true);
+    /// chan.set_enabled(0, true);
+    ///
+    /// assert_eq!(chan.get_enabled(31), true);
+    ///
+    /// // u32 representation
+    /// assert_eq!(chan.as_u32s(), &[0x80000001]);
+    /// ```
+    pub type IOMask = U32Mask<Wx1>;
+
+
+    #[cfg(test)]
+    mod tests {
+        use super::IOMask;
+        use crate::registers::ToU32s;
+
+        #[test]
+        fn get_set_channel() {
+            let mut v = IOMask::new();
+            v.set_enabled(31, true);
+            v.set_enabled(0, true);
+
+            assert_eq!(v.get_enabled(31), true);
+            assert_eq!(v.get_enabled(0), true);
+
+            v.set_enabled(31, false);
+            assert_eq!(v.get_enabled(31), false);
+
+        }
+
+        #[test]
+        fn get_set_all_channels() {
+            let mut v = IOMask::new();
+            v.set_enabled_all(true);
+
+            for c in 0..v.len() {
+                assert_eq!(v.get_enabled(c), true);
+            }
+
+        }
+
+        #[test]
+        fn repr() {
+            let mut v = IOMask::new();
+            v.set_enabled(31, true);
+            v.set_enabled(0, true);
+
+            assert_eq!(&v.as_u32s(), &[0x80000001]);
+
+        }
+
+        #[test]
+        fn toggle() {
+            let mut v = IOMask::new();
+            v.set_enabled(31, true);
+            v.set_enabled(0, true);
+
+            assert_eq!(v.get_enabled(31), true);
+
+            v.toggle(31);
+            assert_eq!(v.get_enabled(31), false);
+        }
+
+    }
 }
