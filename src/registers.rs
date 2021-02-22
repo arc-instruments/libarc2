@@ -928,48 +928,50 @@ pub mod dacvoltage {
 
 }
 
-pub mod adcmask {
+
+pub mod u32mask {
 
     use super::ToU32s;
     use bitvec::prelude::{BitVec, Msb0};
 
+    /// A trait denoting a word size; ie how many words
+    /// a register is using.
+    pub trait WordSize {
+        const WORDS: usize;
+    }
 
-    /// Measurement channel configuration.
-    ///
-    /// An `ADCMask` is used to configure the measurement channels. Essentially
-    /// it defines which channels the Read Current or Read Voltage operation be
-    /// applied.
-    ///
-    /// ## Example
-    /// ```
-    /// use libarc2::register::{ADCMask, ToU32s};
-    ///
-    /// // Standard ArC2 configuration has 64 channels
-    /// let mut chan = ADCMask::new(64);
-    ///
-    /// // set some channels
-    /// chan.set_enabled(31, true);
-    /// chan.set_enabled(0, true);
-    /// chan.set_enabled(62, true);
-    ///
-    /// assert_eq!(chan.get_enabled(31), true);
-    ///
-    /// // u32 representation
-    /// assert_eq!(chan.as_u32s(), &[0x40000000, 0x80000001]);
-    /// ```
-    pub struct ADCMask {
+    /// One word
+    pub struct Wx1;
+    impl WordSize for Wx1 {
+        const WORDS: usize = 1;
+    }
+
+    /// Two words
+    pub struct Wx2;
+    impl WordSize for Wx2 {
+        const WORDS: usize = 2;
+    }
+
+    /// Three words
+    pub struct Wx3;
+    impl WordSize for Wx3 {
+        const WORDS: usize = 3;
+    }
+
+    /// Four words
+    pub struct Wx4;
+    impl WordSize for Wx4 {
+        const WORDS: usize = 4;
+    }
+
+    /// A generic bitmask of the specified word size
+    pub struct U32Mask<T> {
+        _words: T,
         bits: BitVec<Msb0, u32>,
     }
 
 
-    impl ADCMask {
-
-        /// Initialise a new ADC mask. Number of channels can be configurable
-        /// although ArC2 uses 64 channels for ADC inputs, same as the DACs.
-        pub fn new(channels: usize) -> ADCMask {
-            let vec: BitVec<Msb0, u32> = BitVec::repeat(false, channels);
-            ADCMask { bits: vec }
-        }
+    impl<T: WordSize> U32Mask<T> {
 
         /// Set a channel to enabled (`true`) or disabled (`false`).
         pub fn set_enabled(&mut self, idx: usize, status: bool) {
@@ -1013,11 +1015,73 @@ pub mod adcmask {
 
     }
 
-    impl ToU32s for ADCMask {
+    impl<T: WordSize> ToU32s for U32Mask<T> {
         fn as_u32s(&self) -> Vec<u32> {
             self.bits.as_raw_slice().to_vec()
         }
     }
+
+    impl U32Mask<Wx1> {
+        pub fn new() -> U32Mask<Wx1> {
+            let vec: BitVec<Msb0, u32> = BitVec::repeat(false, Wx1::WORDS*32);
+            U32Mask { _words: Wx1{}, bits: vec }
+        }
+    }
+
+    impl U32Mask<Wx2> {
+        pub fn new() -> U32Mask<Wx2> {
+            let vec: BitVec<Msb0, u32> = BitVec::repeat(false, Wx2::WORDS*32);
+            U32Mask { _words: Wx2{}, bits: vec }
+        }
+    }
+
+    impl U32Mask<Wx3> {
+        pub fn new() -> U32Mask<Wx1> {
+            let vec: BitVec<Msb0, u32> = BitVec::repeat(false, Wx3::WORDS*32);
+            U32Mask { _words: Wx1{}, bits: vec }
+        }
+    }
+
+    impl U32Mask<Wx4> {
+        pub fn new() -> U32Mask<Wx2> {
+            let vec: BitVec<Msb0, u32> = BitVec::repeat(false, Wx4::WORDS*32);
+            U32Mask { _words: Wx2{}, bits: vec }
+        }
+    }
+}
+
+
+pub mod adcmask {
+
+    use super::u32mask::{Wx2, U32Mask};
+
+
+    /// Measurement channel configuration bitmask.
+    ///
+    /// An `ADCMask` is used to configure the measurement channels. Essentially
+    /// it defines which channels the Read Current or Read Voltage operation be
+    /// applied.
+    ///
+    /// See [`U32Mask`][`crate::register::U32Mask`] for details and
+    /// methods.
+    ///
+    /// ## Example
+    /// ```
+    /// use libarc2::register::{ADCMask, ToU32s};
+    ///
+    /// let mut chan = ADCMask::new();
+    ///
+    /// // set some channels
+    /// chan.set_enabled(31, true);
+    /// chan.set_enabled(0, true);
+    /// chan.set_enabled(62, true);
+    ///
+    /// assert_eq!(chan.get_enabled(31), true);
+    ///
+    /// // u32 representation
+    /// assert_eq!(chan.as_u32s(), &[0x40000000, 0x80000001]);
+    /// ```
+    pub type ADCMask = U32Mask<Wx2>;
 
 
     #[cfg(test)]
@@ -1027,7 +1091,7 @@ pub mod adcmask {
 
         #[test]
         fn get_set_channel() {
-            let mut v = ADCMask::new(64);
+            let mut v = ADCMask::new();
             v.set_enabled(31, true);
             v.set_enabled(0, true);
             v.set_enabled(62, true);
@@ -1043,7 +1107,7 @@ pub mod adcmask {
 
         #[test]
         fn get_set_all_channels() {
-            let mut v = ADCMask::new(64);
+            let mut v = ADCMask::new();
             v.set_enabled_all(true);
 
             for c in 0..v.len() {
@@ -1054,7 +1118,7 @@ pub mod adcmask {
 
         #[test]
         fn repr() {
-            let mut v = ADCMask::new(64);
+            let mut v = ADCMask::new();
             v.set_enabled(31, true);
             v.set_enabled(0, true);
             v.set_enabled(62, true);
@@ -1065,7 +1129,7 @@ pub mod adcmask {
 
         #[test]
         fn toggle() {
-            let mut v = ADCMask::new(64);
+            let mut v = ADCMask::new();
             v.set_enabled(31, true);
             v.set_enabled(0, true);
             v.set_enabled(62, true);
