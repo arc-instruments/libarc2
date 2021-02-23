@@ -1229,3 +1229,155 @@ pub mod iomask {
 
     }
 }
+
+pub mod ioenable {
+
+    use super::ToU32s;
+    use bitvec::prelude::{BitVec, Lsb0};
+
+    /// IO enable configuration register.
+    ///
+    /// Use this register to set whether I/Os are enabled and what's
+    /// their direction.
+    ///
+    /// This register is laid out as a 4 bit bitmask plus one EN bit.
+    ///
+    /// ```text
+    /// 0b[X][ CH3 CH2 CH1 CH0 ]
+    ///    |    |   |   |   |
+    ///    |    +---+---+---+ --- Set direction: LOW input; high OUPUT
+    ///    |
+    ///    + --- Set low to enable
+    /// ```
+    ///
+    /// ## Example
+    /// ```
+    /// use libarc2::register::{IOEnable, ToU32s};
+    ///
+    /// // all IOs disabled and set as output: 0b[1][1111]
+    /// let none = IOEnable::new();
+    ///
+    /// assert_eq!(none.as_u32s(), &[0x1f]);
+    ///
+    /// // all IOs enabled and set as output: 0b[0][1111]
+    /// let all_outputs = IOEnable::all_output();
+    ///
+    /// assert_eq!(all_outputs.as_u32s(), &[0xf]);
+    /// ```
+    pub struct IOEnable {
+        bits: BitVec<Lsb0, u32>,
+    }
+
+    impl IOEnable {
+        const LEN: usize = 5;
+
+        /// Create a new `IOEnable`. IOs are OFF and set as outputs
+        pub fn new() -> IOEnable {
+            let vec: BitVec<Lsb0, u32> = BitVec::repeat(false, Self::LEN);
+            let mut io = IOEnable { bits: vec };
+            io.set_all_outputs(true);
+
+            // IO is active low so we must set it to 1
+            io.set_enabled(false);
+
+            io
+        }
+
+        /// Create a new `IOEnable` with all IOs enabled and set to output
+        pub fn all_output() -> IOEnable {
+            let vec: BitVec<Lsb0, u32> = BitVec::repeat(false, Self::LEN);
+            let mut io = IOEnable { bits: vec };
+            io.set_all_outputs(true);
+
+            io
+        }
+
+        /// Create a new `IOEnable` with all IOs enabled and set to input
+        pub fn all_input() -> IOEnable {
+            let vec: BitVec<Lsb0, u32> = BitVec::repeat(false, Self::LEN);
+            let mut io = IOEnable { bits: vec };
+            io.set_all_outputs(false);
+
+            io
+        }
+
+        /// Toggle the enable bit
+        pub fn set_enabled(&mut self, status: bool) {
+            // IO Enable is active low
+            self.set_output(Self::LEN-1, !status);
+        }
+
+        pub fn is_enabled(&self) -> bool {
+            !self.bits[Self::LEN-1]
+        }
+
+        /// Set an I/O cluster as output (`true`) or not (`false`)
+        ///
+        /// ```text
+        /// 0b[X][ CH3 CH2 CH1 CH0 ]
+        ///    |    |   |   |   |
+        ///    |    +---+---+---+ --- Set direction: LOW input; high OUPUT
+        ///    |
+        ///    + --- Set low to enable
+        /// ```
+        pub fn set_output(&mut self, idx: usize, status: bool) {
+            self.bits.set(idx, status);
+        }
+
+        /// Set all I/O clusters as output (`true`) or not (`false`)
+        pub fn set_all_outputs(&mut self, status: bool) {
+            for i in 0..(Self::LEN-1) {
+                self.set_output(i, status);
+            }
+        }
+
+    }
+
+    impl ToU32s for IOEnable {
+        fn as_u32s(&self) -> Vec<u32> {
+            self.bits.as_raw_slice().to_vec()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{IOEnable, ToU32s};
+
+        #[test]
+        fn ioenable_new() {
+            // 0b[ 1 ] [ 1111 ]
+            //     ^     ^^^^
+            //     |     ||||
+            //     |     ++++----- all four clusters as outputs...
+            //     +-- ... and disabled (active low)
+            assert_eq!(IOEnable::new().as_u32s(), &[0x1f]);
+        }
+
+        #[test]
+        fn ioenable_all() {
+            // 0b[ 0 ] [ 1111 ]
+            //     ^     ^^^^
+            //     |     ||||
+            //     |     ++++----- all four clusters as outputs...
+            //     +-- ... and enabled (active low)
+            assert_eq!(IOEnable::all_output().as_u32s(), &[0xf]);
+        }
+
+
+        #[test]
+        fn ioenable_new_mut() {
+            let mut io = IOEnable::new();
+            io.set_enabled(true);
+            io.set_output(0, true);
+            io.set_output(1, true);
+            io.set_output(2, false);
+            io.set_output(3, true);
+
+            assert_eq!(io.as_u32s(), &[0xb]);
+
+            io.set_output(2, true);
+            assert_eq!(io.as_u32s(), &[0xf]);
+        }
+    }
+
+}
