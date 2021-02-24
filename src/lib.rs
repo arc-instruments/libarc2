@@ -2,6 +2,7 @@
 
 mod instrument;
 mod registers;
+mod instructions;
 
 pub mod register {
 
@@ -29,3 +30,4 @@ pub mod register {
 }
 
 pub use crate::instrument::*;
+pub use crate::instructions::*;
