@@ -20,7 +20,7 @@ pub mod register {
     pub use crate::registers::empty::Empty;
     pub use crate::registers::dacmask::DACMask;
     pub use crate::registers::u32mask::U32Mask;
-    pub use crate::registers::adcmask::ADCMask;
+    pub use crate::registers::adcmask::{ADCMask, Averaging};
     pub use crate::registers::iomask::IOMask;
     pub use crate::registers::ioenable::IOEnable;
     pub use crate::registers::dacvoltage::DACVoltage;

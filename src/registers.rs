@@ -1054,7 +1054,9 @@ pub mod u32mask {
 
 pub mod adcmask {
 
+    use super::ToU32s;
     use super::u32mask::{Wx2, U32Mask};
+    use num_derive::{FromPrimitive, ToPrimitive};
 
 
     /// Measurement channel configuration bitmask.
@@ -1083,6 +1085,20 @@ pub mod adcmask {
     /// assert_eq!(chan.as_u32s(), &[0x40000000, 0x80000001]);
     /// ```
     pub type ADCMask = U32Mask<Wx2>;
+
+    /// Averaging for read operations
+    #[derive(Clone, Copy, FromPrimitive, ToPrimitive, Debug)]
+    #[repr(u32)]
+    pub enum Averaging {
+        Enabled = 1,
+        Disabled = 0
+    }
+
+    impl ToU32s for Averaging {
+        fn as_u32s(&self) -> Vec<u32> {
+            vec![*self as u32; 1]
+        }
+    }
 
 
     #[cfg(test)]

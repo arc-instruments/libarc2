@@ -2,7 +2,7 @@ use crate::register::ToU32s;
 use crate::register::Terminate;
 use crate::register::{OpCode, Empty, DACMask, DACVoltage};
 use crate::register::{ChannelConf, SourceConf, ChannelState};
-use crate::register::{IOEnable, IOMask};
+use crate::register::{IOEnable, IOMask, ADCMask, Averaging};
 
 macro_rules! make_vec_instr_impl {
     ($t:ident, $f:ident) => {
@@ -424,6 +424,112 @@ impl UpdateLogic {
 impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
 
 
+/// Perform a current read operation on selected channels.
+///
+/// This will create a new current read operation on selected channels.
+/// See documentation on [`ADCMask`][`crate::register::ADCMask`] on how
+/// to select one or more input channels.
+///
+/// ## Instruction layout
+///
+/// ```text
+///        +--------+---------+
+///        | OpCode | ADCMask |
+///        +--------+---------+
+/// Words:     1        2
+/// ```
+///
+/// ## Example
+///
+/// ```
+/// use libarc2::register::ADCMask;
+/// use libarc2::{CurrentRead, Instruction};
+///
+/// // Select channels 31, 0, 62
+/// let mut mask = ADCMask::new();
+/// mask.set_enabled(31, true);
+/// mask.set_enabled(0, true);
+/// mask.set_enabled(62, true);
+///
+/// let mut instr = CurrentRead::new(&mask);
+///
+/// assert_eq!(instr.compile(), &[0x4, 0x40000000, 0x80000001,
+///     0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+/// ```
+pub struct CurrentRead {
+    instrs: Vec<u32>
+}
+
+impl CurrentRead {
+
+    /// Create a new current read instruction
+    pub fn new(channels: &ADCMask) -> Self {
+        let mut instr = Self::create();
+        instr.push_register(&OpCode::CurrentRead);
+        instr.push_register(channels);
+        instr
+    }
+
+}
+
+impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
+
+
+/// Perform a voltage read operation on selected channels.
+///
+/// This will create a new voltage read operation on selected channels.
+/// See documentation on [`ADCMask`][`crate::register::ADCMask`] on how
+/// to select one or more input channels.
+///
+/// ## Instruction layout
+///
+/// ```text
+///        +--------+---------+-----------+
+///        | OpCode | ADCMask | Averaging |
+///        +--------+---------+-----------+
+/// Words:     1         2          1
+/// ```
+///
+/// ## Example
+///
+/// ```
+/// use libarc2::register::ADCMask;
+/// use libarc2::{VoltageRead, Instruction};
+///
+/// // Select channels 31, 0, 62
+/// let mut mask = ADCMask::new();
+/// mask.set_enabled(31, true);
+/// mask.set_enabled(0, true);
+/// mask.set_enabled(62, true);
+///
+/// let mut instr = VoltageRead::new(&mask, true);
+///
+/// assert_eq!(instr.compile(), &[0x8, 0x40000000, 0x80000001,
+///     0x1, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+/// ```
+pub struct VoltageRead {
+    instrs: Vec<u32>
+}
+
+impl VoltageRead {
+
+    /// Create a new voltage read instruction
+    pub fn new(channels: &ADCMask, averaging: bool) -> Self {
+        let mut instr = Self::create();
+        instr.push_register(&OpCode::VoltageRead);
+        instr.push_register(channels);
+        if averaging {
+            instr.push_register(&Averaging::Enabled);
+        } else {
+            instr.push_register(&Averaging::Disabled);
+        }
+        instr
+    }
+
+}
+
+impl Instruction for VoltageRead { make_vec_instr_impl!(VoltageRead, instrs); }
+
 /// Reset hardware to default state
 ///
 /// This instruction resets all output DACs to 0.0 and disables I/O channels
@@ -455,7 +561,7 @@ mod tests {
 
     use crate::register::*;
     use super::{ResetDAC, UpdateDAC, SetDAC, UpdateChannel, Clear, Instruction};
-    use super::{UpdateLogic};
+    use super::{UpdateLogic, CurrentRead, VoltageRead};
 
     #[test]
     fn new_reset_dac() {
@@ -593,6 +699,34 @@ mod tests {
 
         assert_eq!(instr.compile(),
             &[0x20, 0xffffffff, 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+    }
+
+    #[test]
+    fn new_current_read() {
+
+        let mut mask = ADCMask::new();
+        mask.set_enabled(31, true);
+        mask.set_enabled(0, true);
+        mask.set_enabled(62, true);
+
+        let mut instr = CurrentRead::new(&mask);
+
+        assert_eq!(instr.compile(), &[0x4, 0x40000000, 0x80000001,
+            0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+    }
+
+    #[test]
+    fn new_voltage_read() {
+
+        let mut mask = ADCMask::new();
+        mask.set_enabled(31, true);
+        mask.set_enabled(0, true);
+        mask.set_enabled(62, true);
+
+        let mut instr = VoltageRead::new(&mask, true);
+
+        assert_eq!(instr.compile(), &[0x8, 0x40000000, 0x80000001,
+            0x1, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
     }
 
 }
