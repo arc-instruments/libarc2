@@ -338,6 +338,7 @@ pub mod channelconf {
     use num_traits::FromPrimitive;
 
     const CHANSIZE: usize = 3;
+    const NCHAN: usize = 64;
 
     /// Channel configurations currently supported by ArC2.
     /// Use these with [`ChannelConf`] to control
@@ -450,7 +451,7 @@ pub mod channelconf {
     /// use libarc2::register::{ChannelConf, ChannelState, ToU32s};
     ///
     /// // Initialise a new channel configuration register
-    /// let mut reg = ChannelConf::new(64);
+    /// let mut reg = ChannelConf::new();
     ///
     /// // Number of allocated channels
     /// let nchan = reg.len();
@@ -484,12 +485,12 @@ pub mod channelconf {
 
     impl ChannelConf {
 
-        /// Create a new register with the specified number of
-        /// channels. This will be expanded to `CHANSIZE` × channels
+        /// Create a new register with 64 channels.
+        /// This will be expanded to `CHANSIZE` × channels
         /// in the internal bit vector representation.
-        pub fn new(channels: usize) -> ChannelConf {
+        pub fn new() -> ChannelConf {
             // CHANSIZE bits for each channel
-            let vec: BitVec<Msb0, u32> = BitVec::repeat(false, channels*CHANSIZE);
+            let vec: BitVec<Msb0, u32> = BitVec::repeat(false, NCHAN*CHANSIZE);
 
             ChannelConf { bits: vec }
         }
@@ -588,7 +589,7 @@ pub mod channelconf {
 
         #[test]
         fn get_channel() {
-            let mut v = ChannelConf::new(64);
+            let mut v = ChannelConf::new();
             v.set(50, ChannelState::VoltArb);
             let res = v.get(50);
             assert_matches!(res, ChannelState::VoltArb);
@@ -604,7 +605,7 @@ pub mod channelconf {
 
         #[test]
         fn channel_len() {
-            let v = ChannelConf::new(64);
+            let v = ChannelConf::new();
             assert_eq!(v.len(), 64);
         }
 
@@ -622,7 +623,7 @@ pub mod channelconf {
 
         #[test]
         fn all_channel_test() {
-            let mut v = ChannelConf::new(64);
+            let mut v = ChannelConf::new();
             v.set_all(ChannelState::VoltArb);
 
             for channel in &v {
