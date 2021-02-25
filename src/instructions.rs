@@ -1,6 +1,7 @@
 use crate::register::ToU32s;
 use crate::register::Terminate;
 use crate::register::{OpCode, Empty, DACMask, DACVoltage};
+use crate::register::{ChannelConf, SourceConf, ChannelState};
 
 macro_rules! make_vec_instr_impl {
     ($t:ident, $f:ident) => {
@@ -250,6 +251,115 @@ impl SetDAC {
 impl Instruction for SetDAC { make_vec_instr_impl!(SetDAC, instrs); }
 
 
+/// Set channel configuration
+///
+/// The `UpdateChannel` instruction is used to configure all the channels
+/// of ArC2 based on their functionality; see [`ChannelState`] for more details.
+///
+/// ## Instruction layout
+///
+/// ```text
+///        +--------+-------------+---------------+
+///        | OpCode |  SourceConf |  ChannelConf  |
+///        +--------+-------------+---------------+
+/// Words:     1            1             6
+/// ```
+///
+/// ## Example
+/// ```
+/// use libarc2::register::{ChannelConf, SourceConf, ChannelState};
+/// use libarc2::{UpdateChannel, Instruction};
+///
+/// // new channel configuration
+/// let mut chanconf = ChannelConf::new();
+/// // set all output channels to arbitrary voltage
+/// chanconf.set_all(ChannelState::VoltArb);
+///
+/// // source configuration; use default, 11 kΩ digipot
+/// let sourceconf = SourceConf::new();
+///
+/// // make the instruction
+/// let mut instr = UpdateChannel::from_regs(&sourceconf, &chanconf);
+///
+/// assert_eq!(instr.compile(), &[0x40, 0x73400000,
+///     0x92492492, 0x49249249, 0x24924924, 0x92492492,
+///     0x49249249, 0x24924924, 0x80008000]);
+/// ```
+pub struct UpdateChannel {
+    instrs: Vec<u32>
+}
+
+impl UpdateChannel {
+
+    /// Create a new instruction with invalid state.
+    pub fn new() -> Self {
+        Self::from_registers(&[&OpCode::UpdateChannel,
+            &SourceConf::new(), &ChannelConf::new()])
+    }
+
+    /// Create a new instruction from existing configuration.
+    pub fn from_regs(sourceconf: &SourceConf, chanconf: &ChannelConf) -> Self {
+        let mut instr = Self::create();
+        instr.push_register(&OpCode::UpdateChannel);
+        instr.push_register(sourceconf);
+        instr.push_register(chanconf);
+
+        instr
+    }
+
+    /// Create a new instruction with standard source configuration
+    pub fn from_regs_default_source(chanconf: &ChannelConf) -> Self {
+        let mut instr = UpdateChannel::create();
+        instr.push_register(&OpCode::UpdateChannel);
+        instr.push_register(&SourceConf::new());
+        instr.push_register(chanconf);
+
+        instr
+    }
+
+    /// Create a new instruction with default source and specified state
+    ///
+    /// ```
+    /// use libarc2::register::{ChannelState};
+    /// use libarc2::{UpdateChannel, Instruction};
+    ///
+    /// // Arbitrary voltage output
+    /// let state = ChannelState::VoltArb;
+    ///
+    /// let mut instr = UpdateChannel::from_regs_global_state(state);
+    ///
+    /// assert_eq!(instr.compile(), &[0x40, 0x73400000,
+    ///     0x92492492, 0x49249249, 0x24924924, 0x92492492,
+    ///     0x49249249, 0x24924924, 0x80008000]);
+    ///
+    /// ```
+    pub fn from_regs_global_state(state: ChannelState) -> Self {
+        let mut conf = ChannelConf::new();
+        conf.set_all(state);
+        Self::from_regs_default_source(&conf)
+    }
+
+    /// Alter the instruction's channel configuration.
+    pub fn set_channel_conf(&mut self, conf: &ChannelConf) {
+        let chan_conf = conf.as_u32s();
+        for (idx, num) in chan_conf.iter().enumerate() {
+            self.instrs[idx+2] = *num;
+        }
+    }
+
+    /// Alter the instruction's current source configuration.
+    pub fn set_source_conf(&mut self, conf: &SourceConf) {
+        let chan_conf = conf.as_u32s();
+        for (idx, num) in chan_conf.iter().enumerate() {
+            self.instrs[idx+1] = *num;
+        }
+    }
+
+}
+
+impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs); }
+
+
 /// Reset hardware to default state
 ///
 /// This instruction resets all output DACs to 0.0 and disables I/O channels
@@ -280,7 +390,7 @@ impl Instruction for Clear { make_vec_instr_impl!(Clear, instrs); }
 mod tests {
 
     use crate::register::*;
-    use super::{ResetDAC, UpdateDAC, SetDAC, Clear, Instruction};
+    use super::{ResetDAC, UpdateDAC, SetDAC, UpdateChannel, Clear, Instruction};
 
     #[test]
     fn new_reset_dac() {
@@ -395,6 +505,21 @@ mod tests {
             &[0x1, 0x3, 0x0, 0x0, 0x8000, 0x80008000,
               0x80009000, 0x9000FFFF, 0x80008000]);
 
+    }
+
+    #[test]
+    fn new_update_channel_with_regs() {
+
+        let mut chanconf = ChannelConf::new();
+        chanconf.set_all(ChannelState::VoltArb);
+
+        let sourceconf = SourceConf::new();
+
+        let mut instr = UpdateChannel::from_regs(&sourceconf, &chanconf);
+
+        assert_eq!(instr.compile(), &[0x40, 0x73400000,
+            0x92492492, 0x49249249, 0x24924924, 0x92492492,
+            0x49249249, 0x24924924, 0x80008000]);
     }
 
 }
