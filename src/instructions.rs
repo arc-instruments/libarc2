@@ -2,6 +2,7 @@ use crate::register::ToU32s;
 use crate::register::Terminate;
 use crate::register::{OpCode, Empty, DACMask, DACVoltage};
 use crate::register::{ChannelConf, SourceConf, ChannelState};
+use crate::register::{IOEnable, IOMask};
 
 macro_rules! make_vec_instr_impl {
     ($t:ident, $f:ident) => {
@@ -360,6 +361,69 @@ impl UpdateChannel {
 impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs); }
 
 
+/// Configure I/O logic.
+///
+/// This instruction enables or disables the logic I/Os and configures them
+/// as either input or output relative to the FPGA. As a general guideline I/Os
+/// should always be configured regardless whether they are actually
+/// used or not.
+///
+/// ## Instruction layout
+///
+/// ```text
+///        +--------+--------+------------+
+///        | OpCode | IOMask |  IOEnable  |
+///        +--------+--------+------------+
+/// Words:     1        1          1
+/// ```
+///
+/// ## Example
+/// ```
+/// use libarc2::{UpdateLogic, Instruction};
+///
+/// // Create a new update logic instruction setting all i/o as
+/// // output (first argument) and enabling them (second argument).
+/// let mut instr = UpdateLogic::new(true, true);
+///
+/// assert_eq!(instr.compile(),
+///     &[0x20, 0xffffffff, 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+/// ```
+
+pub struct UpdateLogic {
+    instrs: Vec<u32>
+}
+
+impl UpdateLogic {
+
+    /// Create a new instruction configuring _all_ I/O channels as
+    /// either output (`true`) or input (`false`). If you want to
+    /// tune individual channels use [`with_regs`][`UpdateLogic::with_regs`]
+    /// with custom registers.
+    pub fn new(output: bool, enable: bool) -> Self {
+
+        let mut mask = IOMask::new();
+        mask.set_enabled_all(output);
+
+        let mut dir = IOEnable::new();
+        dir.set_enabled(enable);
+
+        Self::with_regs(&mask, &dir)
+
+    }
+
+    /// Create a new instruction from registers.
+    pub fn with_regs(iomask: &IOMask, ioenable: &IOEnable) -> Self {
+        let mut instr = Self::create();
+        instr.push_register(&OpCode::UpdateLogic);
+        instr.push_register(iomask);
+        instr.push_register(ioenable);
+        instr
+    }
+}
+
+impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
+
+
 /// Reset hardware to default state
 ///
 /// This instruction resets all output DACs to 0.0 and disables I/O channels
@@ -391,6 +455,7 @@ mod tests {
 
     use crate::register::*;
     use super::{ResetDAC, UpdateDAC, SetDAC, UpdateChannel, Clear, Instruction};
+    use super::{UpdateLogic};
 
     #[test]
     fn new_reset_dac() {
@@ -520,6 +585,14 @@ mod tests {
         assert_eq!(instr.compile(), &[0x40, 0x73400000,
             0x92492492, 0x49249249, 0x24924924, 0x92492492,
             0x49249249, 0x24924924, 0x80008000]);
+    }
+
+    #[test]
+    fn new_update_logic() {
+        let mut instr = UpdateLogic::new(true, true);
+
+        assert_eq!(instr.compile(),
+            &[0x20, 0xffffffff, 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
     }
 
 }
