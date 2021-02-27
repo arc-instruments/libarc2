@@ -1,10 +1,14 @@
 //use ndarray::{Array, Ix1};
 #[macro_use]
+extern crate lazy_static;
+
+#[macro_use]
 mod macros;
 
 mod instrument;
 mod registers;
 mod instructions;
+
 
 pub mod register {
 

@@ -1,29 +1,72 @@
 use std::{time, thread};
 use beastlink as bl;
 
+use crate::instructions::*;
+
 const EFM03_VID: u16 = 0x10f8;
 const EFM03_PID: u16 = 0xc583;
-const PADDINGU32: u32 = 0x80008000;
 const BASEADDR: u32 = 0x80008000;
 const WRITEDELAY: time::Duration = time::Duration::from_millis(3);
+const BLFLAGS: bl::Flags = bl::Flags::ConstAddress;
+const INBUF: usize = 32;
 
 
+// We are caching common instructions
+lazy_static! {
+    static ref UPDATE_DAC: UpdateDAC = {
+        let mut instr = UpdateDAC::new();
+        instr.compile();
+        instr
+    };
+
+    static ref RESET_DAC: ResetDAC = {
+        let mut instr = ResetDAC::new();
+        instr.compile();
+        instr
+    };
+
+    static ref SET_3V3_LOGIC: SetDAC = {
+        let mut instr = SetDAC::new_3v3_logic();
+        instr.compile();
+        instr
+    };
+}
+
+
+/// ArC2 entry level object
+///
+/// `Instrument` implements the frontend for the ArC2. Its role is essentially
+/// to process instructions and read back results.
 pub struct Instrument {
     efm: bl::Device
 }
 
+/// Find available device IDs.
+///
+/// This function will enumerate all available boards and return an array
+/// with the IDs of all found devices. This can be passed on to
+/// [`Instrument::open()`] to connect to a specific device.
+pub fn find_ids() -> Result<Vec<i32>, String> {
+    let max_id = match bl::enumerate(EFM03_VID, EFM03_PID) {
+        Ok(v) => Ok(v),
+        Err(err) => Err(format!("Could not enumerate devices: {}", err))
+    }?;
+
+    if max_id >= 0 {
+        Ok((0..max_id).collect())
+    } else {
+        // max_id -1 usually indicates an error...
+        Err(format!("Invalid max id: {}", max_id))
+    }
+}
 
 impl Instrument {
 
+    /// Create a new Instrument with a known ID.  Use [`find_ids`]
+    /// to discover devices.
     pub fn open(id: i32) -> Result<Instrument, String> {
-        let max_id = match bl::enumerate(EFM03_VID, EFM03_PID) {
-            Ok(v) => Ok(v),
-            Err(err) => Err(format!("Could not enumerate devices: {}", err))
-        }?;
 
-        if id > max_id {
-            return Err(format!("Invalid id for device {} > {}", id, max_id));
-        }
+        find_ids()?;
 
         match bl::Device::open(id) {
             Ok(d) => Ok(Instrument { efm: d }),
@@ -31,96 +74,78 @@ impl Instrument {
         }
     }
 
-    pub fn open_with_fw(id: i32, path: &str) -> Result<Instrument, String> {
-        let instr = Instrument::open(id)?;
-        instr.load_firmware(&path)?;
-        instr.reset_dacs()?;
-
-        Ok(instr)
-    }
-
+    /// Load an FPGA bitstream from a file.
+    /// The DAC clusters of the instrument will be initialised to their
+    /// default state after successful load.
     pub fn load_firmware(&self, path: &str) -> Result<(), String> {
         match self.efm.program_from_file(&path) {
             Ok(()) => { Ok(()) },
             Err(err) => { Err(format!("Could not program FPGA: {}", err)) }
+        }?;
+
+        match self.reset_dacs() {
+            Ok(()) => { Ok(()) },
+            Err(err) => { Err(format!("Could not initialise DACs: {}", err)) }
         }
+
     }
 
-    pub fn write_packet(&self, in_packet: &[u32]) -> Result<(), String> {
+    /// Open a new Instrument with a specified id and bitstream.
+    /// This essentially combines [`Instrument::open()`] and
+    /// [`Instrument::load_firmware()`].
+    pub fn open_with_fw(id: i32, path: &str) -> Result<Instrument, String> {
+        let instr = Instrument::open(id)?;
+        instr.load_firmware(&path)?;
 
-        let inlen: u32 = in_packet.len() as u32;
+        Ok(instr)
+    }
 
-        // Input length MUST be a multiple of 8
-        if inlen % 8 != 0 {
-            return Err(String::from("Invalid packet length; must be N×8×(u32)"));
-        }
+    /// Process a compiled instruction
+    pub fn process<T: Instruction>(&self, instr: &T) -> Result<(), String> {
 
-        // This is the working packet; it's 8×u32 + padding = 9×u32. We need to
-        // write instructions 8+1 at a time from BASEADDR.
-        let mut wp: Vec<u8> = Vec::with_capacity(4*9 as usize);
+        match self.efm.write_block(BASEADDR, &mut instr.to_bytevec(), BLFLAGS) {
 
-        // split the u32s into 4 × BE u8s
-        for (i, num) in in_packet.iter().enumerate() {
-            wp.extend_from_slice(&num.to_be_bytes());
-
-            if i > 0 && (i+1) % 8 == 0 {
-
-                // padding bytes
-                wp.extend_from_slice(&PADDINGU32.to_be_bytes());
-
-                // abort if a packet could not be written; on success wait WRITEDELAY ms
-                // before continuing and truncate the working packet back to 0
-                match self.efm.write_block(BASEADDR, &mut wp, bl::Flags::ConstAddress) {
-
-                    Ok(()) => {
-                        wp.truncate(0);
-                        thread::sleep(WRITEDELAY);
-                    },
-
-                    Err(err) => return Err(format!("Could not write buffer: {}", err))
-                }
-            }
+            Ok(()) => {
+                thread::sleep(WRITEDELAY);
+            },
+            Err(err) => return Err(format!("Could not write buffer: {}", err))
         }
 
         Ok(())
+    }
+
+    /// Compiles and process an instruction
+    pub fn compile_process<T: Instruction>(&self, instr: &mut T) -> Result<(), String> {
+
+        self.process(instr.compile())
 
     }
 
+    /// Read raw data from block memory
+    pub fn read_raw(&self) -> Result<Vec<u8>, String> {
+        match self.efm.read_block(BASEADDR, INBUF as i32, BLFLAGS) {
+            Ok(buf) => Ok(buf),
+            Err(err) => Err(format!("Could not read block memory: {}", err))
+        }
+    }
+
+    /// Reset all DACs on the tool
     pub fn reset_dacs(&self) -> Result<(), String> {
-        let packet: [u32; 8] = [
-            0x0000_0001, // opcode 0x1
-            0x0000_ffff, // all DACs bitmask
-            0x0000_0000, // unused
-            0x0000_0000, // unused
-            0x8000_8000, // +V: 0V; -V: 0V
-            0x8000_8000, // +V: 0V; -V: 0V
-            0x8000_8000, // +V: 0V; -V: 0V
-            0x8000_8000  // +V: 0V; -V: 0V
-        ];
-
-        self.write_packet(&packet)
+        self.process(&*RESET_DAC)?;
+        self.load_dacs()
     }
 
-    pub fn load_dacs(&self) -> Result<(), String> {
-        let packet: [u32; 8] = [
-            0x0000_0002, // opcode 0x2
-            0x0000_0000, // unused
-            0x0000_0000, // unused
-            0x0000_0000, // unused
-            0x0000_0000, // unused
-            0x0000_0000, // unused
-            0x0000_0000, // unused
-            0x0000_0000  // unused
-        ];
-
-        self.write_packet(&packet)
+    /// Set global 3.3 V logic level
+    pub fn set_3v3_logic(&self) -> Result<(), String> {
+        self.process(&*SET_3V3_LOGIC)?;
+        self.load_dacs()
     }
 
-    /*pub fn make_buffer(&self, len: u32) -> Array<u32, Ix1> {
-        let mut arr = Array::<u32, Ix1>::zeros(len as usize);
-        arr[0]= 5u32;
-        arr
-    }*/
+    /// Update the DAC configuration
+    fn load_dacs(&self) -> Result<(), String> {
+        self.process(&*UPDATE_DAC)
+    }
+
 }
 
 impl Drop for Instrument {

@@ -91,10 +91,5 @@ mod hardware {
             Ok(_) => { println!("Firmware loaded succesfully") }
             Err(err) => { panic!("Could not load firmware: {}", err) }
         };
-
-        match device.reset_dacs() {
-            Ok(_) => { println!("RESET_DAC buffer written succesfully") }
-            Err(err) => { panic!("Could not write RESET_DAC buffer: {}", err) }
-        }
     }
 }

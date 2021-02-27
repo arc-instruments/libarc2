@@ -13,6 +13,7 @@ bitvec = "0.21"
 bitflags = "1.2"
 num-derive = "0.3"
 num-traits = "0.2"
+lazy_static = "1.4"
 
 [dependencies.beastlink]
 path = "../beastlink-rs"
