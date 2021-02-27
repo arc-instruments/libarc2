@@ -1,4 +1,6 @@
 //use ndarray::{Array, Ix1};
+#[macro_use]
+mod macros;
 
 mod instrument;
 mod registers;
