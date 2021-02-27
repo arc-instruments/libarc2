@@ -35,9 +35,8 @@ macro_rules! make_vec_instr_impl {
 /// instructions must implement the `create`, `push_u32s`, `len` and `view`
 /// functions. Everything else is derived from these.
 ///
-/// Instructions can be "compiled" into a `&[u32]` buffer that is
-/// suitable padded and terminated and can be written directly with
-/// [`write_packet`][`crate::Instrument::write_packet`].
+/// Instructions can be "compiled" into a `&[u32]` buffer and can be written
+/// directly with [`process`][`crate::Instrument::process()`].
 pub trait Instruction {
 
     #[doc(hidden)]
@@ -62,7 +61,8 @@ pub trait Instruction {
 
     /// Pad and terminate instruction for consumption. This will be
     /// typically communicated to ArC2 using the
-    /// [`write_packet`][`crate::Instrument::write_packet`].
+    /// [`process`][`crate::Instrument::process()`] and
+    /// [`compile_process`][`crate::Instrument::compile_process`] functions.
     ///
     /// ```ignore
     /// use libarc2::{Instrument, ResetDAC, Instruction};
@@ -70,9 +70,9 @@ pub trait Instruction {
     /// let arc2 = Instrument::open_with_fw(0, "fw.bin").unwrap();
     ///
     /// let reset = ResetDAC::new();
-    /// arc2.write_packet(reset.compile());
+    /// arc2.compile_process(reset.compile());
     /// ```
-    fn compile(&mut self) -> &[u32] {
+    fn compile(&mut self) -> &mut Self {
         for _ in 0..(Self::LENGTH-self.len()-1) {
             self.push_register(&Empty::new());
         }
@@ -81,7 +81,7 @@ pub trait Instruction {
             self.push_register(&Terminate::new());
         }
 
-        &self.view()
+        self
     }
 
     #[doc(hidden)]
@@ -217,7 +217,7 @@ impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs); }
 ///
 /// let mut instr = SetDAC::with_regs(&mask, &voltages);
 ///
-/// assert_eq!(instr.compile(),
+/// assert_eq!(instr.compile().view(),
 ///     &[0x1, 0x3, 0x0, 0x0, 0x8000, 0x80008000,
 ///       0x80009000, 0x9000FFFF, 0x80008000]);
 /// ```
@@ -326,7 +326,7 @@ impl Instruction for SetDAC { make_vec_instr_impl!(SetDAC, instrs); }
 /// // make the instruction
 /// let mut instr = UpdateChannel::from_regs(&sourceconf, &chanconf);
 ///
-/// assert_eq!(instr.compile(), &[0x40, 0x73400000,
+/// assert_eq!(instr.compile().view(), &[0x40, 0x73400000,
 ///     0x92492492, 0x49249249, 0x24924924, 0x92492492,
 ///     0x49249249, 0x24924924, 0x80008000]);
 /// ```
@@ -373,7 +373,7 @@ impl UpdateChannel {
     ///
     /// let mut instr = UpdateChannel::from_regs_global_state(state);
     ///
-    /// assert_eq!(instr.compile(), &[0x40, 0x73400000,
+    /// assert_eq!(instr.compile().view(), &[0x40, 0x73400000,
     ///     0x92492492, 0x49249249, 0x24924924, 0x92492492,
     ///     0x49249249, 0x24924924, 0x80008000]);
     ///
@@ -429,7 +429,7 @@ impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs)
 /// // output (first argument) and enabling them (second argument).
 /// let mut instr = UpdateLogic::new(true, true);
 ///
-/// assert_eq!(instr.compile(),
+/// assert_eq!(instr.compile().view(),
 ///     &[0x20, 0xffffffff, 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 /// ```
 
@@ -497,7 +497,7 @@ impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
 ///
 /// let mut instr = CurrentRead::new(&mask);
 ///
-/// assert_eq!(instr.compile(), &[0x4, 0x40000000, 0x80000001,
+/// assert_eq!(instr.compile().view(), &[0x4, 0x40000000, 0x80000001,
 ///     0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 /// ```
 pub struct CurrentRead {
@@ -548,7 +548,7 @@ impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
 ///
 /// let mut instr = VoltageRead::new(&mask, true);
 ///
-/// assert_eq!(instr.compile(), &[0x8, 0x40000000, 0x80000001,
+/// assert_eq!(instr.compile().view(), &[0x8, 0x40000000, 0x80000001,
 ///     0x1, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 /// ```
 pub struct VoltageRead {
@@ -611,7 +611,7 @@ mod tests {
     fn new_reset_dac() {
         let mut instr = ResetDAC::new();
 
-        assert_eq!(instr.compile(),
+        assert_eq!(instr.compile().view(),
             &[0x1, 0xffff, 0x0, 0x0, 0x80008000, 0x80008000, 0x80008000,
               0x80008000, 0x80008000]);
 
@@ -625,7 +625,7 @@ mod tests {
     #[test]
     fn new_update_dac() {
         let mut instr = UpdateDAC::new();
-        assert_eq!(instr.compile(),
+        assert_eq!(instr.compile().view(),
             &[0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn new_clear() {
         let mut instr = Clear::new();
-        assert_eq!(instr.compile(),
+        assert_eq!(instr.compile().view(),
             &[0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
@@ -675,7 +675,7 @@ mod tests {
 
         let mut instr = SetDAC::with_regs(&mask, &voltages);
 
-        assert_eq!(instr.compile(),
+        assert_eq!(instr.compile().view(),
             &[0x1, 0x3, 0x0, 0x0, 0x8000, 0x80008000,
               0x80009000, 0x9000FFFF, 0x80008000]);
 
@@ -717,7 +717,7 @@ mod tests {
         instr.set_mask(&mask);
         instr.set_voltages(&voltages);
 
-        assert_eq!(instr.compile(),
+        assert_eq!(instr.compile().view(),
             &[0x1, 0x3, 0x0, 0x0, 0x8000, 0x80008000,
               0x80009000, 0x9000FFFF, 0x80008000]);
 
@@ -733,7 +733,7 @@ mod tests {
     fn new_set_dac_3v3_logic() {
         let mut instr = SetDAC::new_3v3_logic();
 
-        assert_eq!(instr.compile(), &[0x1, 0x20000, 0x0, 0x0, 0x0,
+        assert_eq!(instr.compile().view(), &[0x1, 0x20000, 0x0, 0x0, 0x0,
             0xeeab0000, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
@@ -753,7 +753,7 @@ mod tests {
 
         let mut instr = UpdateChannel::from_regs(&sourceconf, &chanconf);
 
-        assert_eq!(instr.compile(), &[0x40, 0x73400000,
+        assert_eq!(instr.compile().view(), &[0x40, 0x73400000,
             0x92492492, 0x49249249, 0x24924924, 0x92492492,
             0x49249249, 0x24924924, 0x80008000]);
 
@@ -768,7 +768,7 @@ mod tests {
     fn new_update_logic() {
         let mut instr = UpdateLogic::new(true, true);
 
-        assert_eq!(instr.compile(),
+        assert_eq!(instr.compile().view(),
             &[0x20, 0xffffffff, 0xf, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
@@ -788,7 +788,7 @@ mod tests {
 
         let mut instr = CurrentRead::new(&mask);
 
-        assert_eq!(instr.compile(), &[0x4, 0x40000000, 0x80000001,
+        assert_eq!(instr.compile().view(), &[0x4, 0x40000000, 0x80000001,
             0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
@@ -808,7 +808,7 @@ mod tests {
 
         let mut instr = VoltageRead::new(&mask, true);
 
-        assert_eq!(instr.compile(), &[0x8, 0x40000000, 0x80000001,
+        assert_eq!(instr.compile().view(), &[0x8, 0x40000000, 0x80000001,
             0x1, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
