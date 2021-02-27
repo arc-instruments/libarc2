@@ -848,7 +848,8 @@ pub mod dacvoltage {
 
         /// Set the Vlow value of a specified channel index
         pub fn set_low(&mut self, idx: usize, voltage: u16) {
-            self.values[idx] |= voltage as u32;
+            self.values[idx] = (voltage as u32) <<  0 |
+                (self.values[idx] & 0xFFFF0000);
         }
 
         /// Get the Vlow value of a specified channel index
