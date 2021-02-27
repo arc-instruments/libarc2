@@ -237,6 +237,36 @@ impl SetDAC {
                                &Empty::new()])
     }
 
+
+    /// Create a new logic instruction
+    ///
+    /// This instruction operates on the AUX1 DAC which is used
+    /// to set the logic level for the board. This function will
+    /// return an instruction suitable for 3.3V logic;
+    pub fn new_3v3_logic() -> Self {
+        let mut instr = SetDAC::create();
+        instr.push_register(&OpCode::SetDAC);
+        instr.push_register(&DACMask::AUX1);
+        instr.push_register(&Empty::new());
+        instr.push_register(&Empty::new());
+
+        let mut voltages = DACVoltage::new();
+        voltages.set_high(0, 0x0000);
+        voltages.set_low(0, 0x0000);
+
+        // Voltage will be divided by 2.62 internally to get
+        // the actual voltage: 8.646/2.62 = 3.3.
+        voltages.set_high(1, vidx!(8.646));
+        voltages.set_low(1, 0x0000);
+        voltages.set_high(2, 0x0000);
+        voltages.set_low(2, 0x0000);
+        voltages.set_high(3, 0x0000);
+        voltages.set_low(3, 0x0000);
+        instr.push_register(&voltages);
+
+        instr
+    }
+
     /// Create a new instruction with specified registers
     pub fn with_regs(chanmask: &DACMask, voltages: &DACVoltage) -> Self {
         let mut instr = SetDAC::create();
@@ -697,6 +727,20 @@ mod tests {
               0x80, 0x00, 0x80, 0x00, 0x90, 0x00, 0x90, 0x00, 0xFF, 0xFF, 0x80,
               0x00, 0x80, 0x00]);
 
+    }
+
+    #[test]
+    fn new_set_dac_3v3_logic() {
+        let mut instr = SetDAC::new_3v3_logic();
+
+        assert_eq!(instr.compile(), &[0x1, 0x20000, 0x0, 0x0, 0x0,
+            0xeeab0000, 0x0, 0x0, 0x80008000]);
+
+        assert_eq!(instr.to_bytevec(),
+            &[0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xee, 0xab,
+              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80,
+              0x00, 0x80, 0x00]);
     }
 
     #[test]
