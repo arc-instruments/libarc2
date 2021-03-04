@@ -12,3 +12,27 @@ macro_rules! vidx {
     }
 }
 
+#[cfg(feature="debug_packets")]
+macro_rules! instrdbg {
+    ($val: expr) => {
+        eprintln!("INSTR: {:08x?}", $val.view());
+        eprintln!("INSTR: {:02x?}", $val.to_bytevec());
+    }
+}
+
+#[cfg(feature="debug_packets")]
+macro_rules! pktdbg {
+    ($val: expr) => {
+        eprintln!("BUFFR: {:02x?}", $val);
+    }
+}
+
+#[cfg(not(feature="debug_packets"))]
+macro_rules! instrdbg {
+    ($val: expr) => { }
+}
+
+#[cfg(not(feature="debug_packets"))]
+macro_rules! pktdbg {
+    ($val: expr) => { }
+}
