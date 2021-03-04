@@ -7,7 +7,8 @@ const EFM03_VID: u16 = 0x10f8;
 const EFM03_PID: u16 = 0xc583;
 const BASEADDR: u32 = 0x80008000;
 const WRITEDELAY: time::Duration = time::Duration::from_millis(3);
-const BLFLAGS: bl::Flags = bl::Flags::ConstAddress;
+const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
+const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
 const INBUF: usize = 32*std::mem::size_of::<u32>();
 
 
@@ -99,6 +100,7 @@ impl Instrument {
     pub fn process<T: Instruction>(&self, instr: &T) -> Result<(), String> {
 
         match self.efm.write_block(BASEADDR, &mut instr.to_bytevec(), BLFLAGS) {
+        match self.efm.write_block(BASEADDR, &mut instr.to_bytevec(), BLFLAGS_W) {
 
             Ok(()) => {
                 thread::sleep(WRITEDELAY);
@@ -119,6 +121,7 @@ impl Instrument {
     /// Read raw data from block memory
     pub fn read_raw(&self) -> Result<Vec<u8>, String> {
         match self.efm.read_block(BASEADDR, INBUF as i32, BLFLAGS) {
+        match self.efm.read_block(BASEADDR, INBUF as i32, BLFLAGS_R) {
             Ok(buf) => Ok(buf),
             Err(err) => Err(format!("Could not read block memory: {}", err))
         }
