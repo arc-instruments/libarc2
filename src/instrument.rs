@@ -5,7 +5,7 @@ use crate::instructions::*;
 
 const EFM03_VID: u16 = 0x10f8;
 const EFM03_PID: u16 = 0xc583;
-const BASEADDR: u32 = 0x80008000;
+const BASEADDR: u32 = 0x80000000;
 const WRITEDELAY: time::Duration = time::Duration::from_millis(3);
 const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
