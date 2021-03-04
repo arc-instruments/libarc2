@@ -96,6 +96,9 @@ impl Instrument {
     pub fn open_with_fw(id: i32, path: &str) -> Result<Instrument, String> {
         let instr = Instrument::open(id)?;
         instr.load_firmware(&path)?;
+        instr.process(&*RESET_DAC)?;
+        instr.process(&*SET_3V3_LOGIC)?;
+        instr.process(&*UPDATE_DAC)?;
 
         Ok(instr)
     }
@@ -142,7 +145,7 @@ impl Instrument {
     }
 
     /// Update the DAC configuration
-    fn load_dacs(&self) -> Result<(), String> {
+    pub fn load_dacs(&self) -> Result<(), String> {
         self.process(&*UPDATE_DAC)
     }
 
