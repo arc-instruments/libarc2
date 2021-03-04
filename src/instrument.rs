@@ -8,7 +8,7 @@ const EFM03_PID: u16 = 0xc583;
 const BASEADDR: u32 = 0x80008000;
 const WRITEDELAY: time::Duration = time::Duration::from_millis(3);
 const BLFLAGS: bl::Flags = bl::Flags::ConstAddress;
-const INBUF: usize = 32;
+const INBUF: usize = 32*std::mem::size_of::<u32>();
 
 
 // We are caching common instructions
