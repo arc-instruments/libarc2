@@ -495,6 +495,15 @@ pub mod channelconf {
             ChannelConf { bits: vec }
         }
 
+        /// Create a new register with 64 channels and set all channels to
+        /// the specified state.
+        pub fn new_with_state(state: ChannelState) -> ChannelConf {
+            let mut conf = ChannelConf::new();
+            conf.set_all(state);
+
+            conf
+        }
+
         /// Set a channel to a [`ChannelState`] value
         pub fn set(&mut self, idx: usize, val: ChannelState) {
             let bits = self.bits.as_mut_bitslice();
@@ -625,6 +634,24 @@ pub mod channelconf {
         fn all_channel_test() {
             let mut v = ChannelConf::new();
             v.set_all(ChannelState::VoltArb);
+
+            for channel in &v {
+                assert_matches!(channel, ChannelState::VoltArb);
+            }
+
+            let slice = v.as_u32s();
+
+            assert_eq!(slice[0], 0x92492492);
+            assert_eq!(slice[1], 0x49249249);
+            assert_eq!(slice[2], 0x24924924);
+            assert_eq!(slice[3], 0x92492492);
+            assert_eq!(slice[4], 0x49249249);
+            assert_eq!(slice[5], 0x24924924);
+        }
+
+        #[test]
+        fn new_all_channels() {
+            let v = ChannelConf::new_with_state(ChannelState::VoltArb);
 
             for channel in &v {
                 assert_matches!(channel, ChannelState::VoltArb);
