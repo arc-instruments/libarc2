@@ -75,19 +75,11 @@ impl Instrument {
     }
 
     /// Load an FPGA bitstream from a file.
-    /// The DAC clusters of the instrument will be initialised to their
-    /// default state after successful load.
     pub fn load_firmware(&self, path: &str) -> Result<(), String> {
         match self.efm.program_from_file(&path) {
             Ok(()) => { Ok(()) },
             Err(err) => { Err(format!("Could not program FPGA: {}", err)) }
-        }?;
-
-        match self.reset_dacs() {
-            Ok(()) => { Ok(()) },
-            Err(err) => { Err(format!("Could not initialise DACs: {}", err)) }
         }
-
     }
 
     /// Open a new Instrument with a specified id and bitstream.
