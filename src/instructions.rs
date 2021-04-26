@@ -70,7 +70,7 @@ pub trait Instruction {
     /// let arc2 = Instrument::open_with_fw(0, "fw.bin").unwrap();
     ///
     /// let reset = ResetDAC::new();
-    /// arc2.compile_process(reset.compile());
+    /// arc2.process(reset.compile());
     /// ```
     fn compile(&mut self) -> &mut Self {
         for _ in 0..(Self::LENGTH-self.len()-1) {
