@@ -415,7 +415,10 @@ impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs)
 /// the documentation of [`Duration50`][`crate::register::Duration50`]. The
 /// maximum delay we can implement on board is `2^32 × 20 ns` although realistically
 /// for delays greater than a second one might want to use software delays. Values
-/// exceeding this maximum will be capped to fit.
+/// exceeding this maximum will be capped to fit. We cannot also do delays lower than
+/// 320 ns (16 increments) since that's the time required by the FPGA to process the
+/// instruction. So all arguments will be implicitly decremented by 320 ns to
+/// account for that (hence the 320 ns minimum).
 ///
 /// ## Instruction layout
 ///
@@ -433,25 +436,42 @@ impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs)
 ///
 /// // Delays are rounded to the lowest increment of 20 ns
 /// let mut instr0 = Delay::from_nanos(1210);
+/// // Actual time is 320 ns (0x10 increments) lower than whatever the
+/// // argument specifies to account for settling times
 /// assert_eq!(instr0.compile().view(),
-///     &[0x2000, 0x3C, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+///     &[0x2000, 0x3C-0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 ///
 /// // Same but with a `Duration` object
 /// let mut instr1 = Delay::from_duration(&Duration::from_nanos(1210));
 /// assert_eq!(instr1.compile().view(),
-///     &[0x2000, 0x3C, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+///     &[0x2000, 0x3C-0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+///
+/// let mut instr2 = Delay::from_nanos(200);
+/// // Can't go below 320 ns (0x10 increments)
+/// assert_eq!(instr2.compile().view(),
+///     &[0x2000, 0x10-0x10, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
 /// ```
 pub struct Delay {
     instrs: Vec<u32>
 }
 
 impl Delay {
+
+    const MIN_NS: u128 = 320;
+
     /// Create a new Delay instruction from the specified
     /// number of nanoseconds.
     pub fn from_nanos(ns: u128) -> Delay {
         let mut instr = Delay::create();
+
+        let actual_ns = if ns <= Self::MIN_NS {
+            0
+        } else {
+            ns - Self::MIN_NS
+        };
+
         instr.push_register(&OpCode::Delay);
-        instr.push_register(&Duration50::from_nanos(ns));
+        instr.push_register(&Duration50::from_nanos(actual_ns));
 
         instr
     }
