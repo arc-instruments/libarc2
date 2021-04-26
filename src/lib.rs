@@ -23,6 +23,7 @@ pub mod register {
     pub use crate::registers::channelconf::*;
     pub use crate::registers::opcode::OpCode;
     pub use crate::registers::terminate::Terminate;
+    pub use crate::registers::duration::Duration50;
     pub use crate::registers::empty::Empty;
     pub use crate::registers::dacmask::DACMask;
     pub use crate::registers::u32mask::U32Mask;

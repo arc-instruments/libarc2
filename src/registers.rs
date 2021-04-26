@@ -43,7 +43,9 @@ pub mod opcode {
         /// Modify channel configuration.
         ModifyChannel  = 0x00000400,
         /// Set DAC Offsets (currently nop).
-        SetDACOffset   = 0x00001000
+        SetDACOffset   = 0x00001000,
+        /// Delay (20 ns precision)
+        Delay          = 0x00002000
     }
 
     impl ToU32s for OpCode {
@@ -107,6 +109,73 @@ pub mod terminate {
 
 
 }
+
+pub mod duration {
+    use super::ToU32s;
+
+    // This is the maximum duration we can fit in a 32bit integer on
+    // a 50 MHz clock (20 ns increments)
+    // We can fit up to 2^32 20 ns steps
+    // We choose u128 as the underlying type to maintain compatibility
+    // with the std::time::Duration API. Values will never exceed this
+    // value otherwise.
+    const MAX_DURATION_NS: u128 = 20u128 * (std::u32::MAX as u128);
+
+    /// Register used to denote durations (50 MHz precision)
+    ///
+    /// The `Duration` register is used to encode duration. This might be
+    /// required, for instance, to allow for delays when settling during
+    /// configuration of the system DACs or to create arbitrary waveforms
+    /// where the precision of High Speed Driver is not required. Durations
+    /// can either be created by specifying the nanosecond delay or from a
+    /// [`std::time::Duration`] object.
+    ///
+    /// ## Examples
+    /// ```
+    /// use libarc2::register::{Duration50, ToU32s};
+    /// use std::time::Duration;
+    ///
+    /// let delay0 = Duration50::from_nanos(1210);
+    /// // int(1210/20) = 60 or 0x3C
+    /// assert_eq!(delay0.as_u32s()[0], 0x3C);
+    ///
+    /// let delay1 = Duration50::from_duration(&Duration::from_nanos(1210));
+    /// assert_eq!(delay1.as_u32s()[0], 0x3C);
+    ///
+    /// // This one exceeds the maximum value and will be capped.
+    /// let delay2 = Duration50::from_nanos(87000000000);
+    /// assert_eq!(delay2.as_u32s()[0], 0xFFFFFFFF);
+    /// ```
+    pub struct Duration50(u32);
+
+    impl Duration50 {
+
+        /// Create a new delay register with 20 ns precision. Please note
+        /// that even though a `u128` is used as an argument the maximum
+        /// delay value that is supported by ArC2 is `2^32 × 20 ns`. Values
+        /// over that maximum will be capped.
+        pub fn from_nanos(ns: u128) -> Duration50 {
+            if ns > MAX_DURATION_NS {
+                Duration50(std::u32::MAX)
+            } else {
+                Duration50((ns / 20) as u32)
+            }
+        }
+
+        /// Create a new delay register with 20 ns precision from a
+        /// [`Duration`][`std::time::Duration`] object.
+        pub fn from_duration(duration: &std::time::Duration) -> Duration50 {
+            Duration50::from_nanos(duration.as_nanos())
+        }
+    }
+
+    impl ToU32s for Duration50 {
+        fn as_u32s(&self) -> Vec<u32> {
+            [self.0].to_vec()
+        }
+    }
+}
+
 
 pub mod dacmask {
     use super::ToU32s;

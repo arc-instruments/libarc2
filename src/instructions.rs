@@ -3,6 +3,7 @@ use crate::register::Terminate;
 use crate::register::{OpCode, Empty, DACMask, DACVoltage};
 use crate::register::{ChannelConf, SourceConf, ChannelState};
 use crate::register::{IOEnable, IOMask, ADCMask, Averaging};
+use crate::register::{Duration50};
 
 macro_rules! make_vec_instr_impl {
     ($t:ident, $f:ident) => {
@@ -402,7 +403,65 @@ impl UpdateChannel {
 
 }
 
+
 impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs); }
+
+
+/// Delays with 20 ns precision
+///
+/// The `Delay` instruction is used to configure to insert delays into the ArC2
+/// command buffer. This can be used for settling other instructions or creating
+/// arbitrary waveforms. The delay is essentially a 50 MHz timer as described in
+/// the documentation of [`Duration50`][`crate::register::Duration50`]. The
+/// maximum delay we can implement on board is `2^32 × 20 ns` although realistically
+/// for delays greater than a second one might want to use software delays. Values
+/// exceeding this maximum will be capped to fit.
+///
+/// ## Instruction layout
+///
+/// ```text
+///        +--------+------------+
+///        | OpCode | Duration50 |
+///        +--------+------------+
+/// Words:     1          1
+/// ```
+///
+/// ## Example
+/// ```
+/// use libarc2::{Delay, Instruction};
+/// use std::time::Duration;
+///
+/// // Delays are rounded to the lowest increment of 20 ns
+/// let mut instr0 = Delay::from_nanos(1210);
+/// assert_eq!(instr0.compile().view(),
+///     &[0x2000, 0x3C, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+///
+/// // Same but with a `Duration` object
+/// let mut instr1 = Delay::from_duration(&Duration::from_nanos(1210));
+/// assert_eq!(instr1.compile().view(),
+///     &[0x2000, 0x3C, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+/// ```
+pub struct Delay {
+    instrs: Vec<u32>
+}
+
+impl Delay {
+    /// Create a new Delay instruction from the specified
+    /// number of nanoseconds.
+    pub fn from_nanos(ns: u128) -> Delay {
+        let mut instr = Delay::create();
+        instr.push_register(&OpCode::Delay);
+        instr.push_register(&Duration50::from_nanos(ns));
+
+        instr
+    }
+
+    pub fn from_duration(duration: &std::time::Duration) -> Delay {
+        Delay::from_nanos(duration.as_nanos())
+    }
+}
+
+impl Instruction for Delay { make_vec_instr_impl!(Delay, instrs); }
 
 
 /// Configure I/O logic.
