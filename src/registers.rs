@@ -176,6 +176,33 @@ pub mod duration {
     }
 }
 
+pub mod address {
+    use super::ToU32s;
+    use num_derive::{FromPrimitive, ToPrimitive};
+    use num_traits::{FromPrimitive};
+
+    /// An FPGA memory address associated with an operation
+    ///
+    /// This is practically a [`u32`] underneath and can be treated
+    /// as such. Typically is associated with an operation that would need
+    /// to output data into the FPGA's memory such as
+    /// [`CurrentRead`][`crate::instructions::CurrentRead`] or
+    /// [`VoltageRead`][`crate::instructions::VoltageRead`].
+    #[derive(FromPrimitive, ToPrimitive)]
+    pub struct Address(u32);
+
+    impl Address {
+        pub fn new(addr: u32) -> Address {
+            Address::from_u32(addr).unwrap()
+        }
+    }
+
+    impl ToU32s for Address {
+        fn as_u32s(&self) -> Vec<u32> {
+            [self.0].to_vec()
+        }
+    }
+}
 
 pub mod dacmask {
     use super::ToU32s;

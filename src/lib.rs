@@ -32,6 +32,7 @@ pub mod register {
     pub use crate::registers::ioenable::IOEnable;
     pub use crate::registers::dacvoltage::DACVoltage;
     pub use crate::registers::sourceconf::*;
+    pub use crate::registers::address::*;
 
     pub use crate::registers::ToU32s;
 }
