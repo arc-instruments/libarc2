@@ -1054,10 +1054,7 @@ pub mod dacvoltage {
 }
 
 
-pub mod u32mask {
-
-    use super::ToU32s;
-    use bitvec::prelude::{BitVec, Msb0};
+pub mod wordreg {
 
     /// A trait denoting a word size; ie how many words
     /// a register is using.
@@ -1088,6 +1085,33 @@ pub mod u32mask {
     impl WordSize for Wx4 {
         const WORDS: usize = 4;
     }
+
+    /// Five words
+    pub struct Wx5;
+    impl WordSize for Wx5 {
+        const WORDS: usize = 5;
+    }
+
+    /// Six words
+    pub struct Wx6;
+    impl WordSize for Wx6 {
+        const WORDS: usize = 6;
+    }
+
+    /// Seven words
+    pub struct Wx7;
+    impl WordSize for Wx7 {
+        const WORDS: usize = 7;
+    }
+}
+
+
+pub mod u32mask {
+
+    use super::ToU32s;
+    use super::wordreg::*;
+    use bitvec::prelude::{BitVec, Msb0};
+
 
     /// A generic bitmask of the specified word size
     pub struct U32Mask<T> {
@@ -1179,7 +1203,8 @@ pub mod u32mask {
 pub mod adcmask {
 
     use super::ToU32s;
-    use super::u32mask::{Wx2, U32Mask};
+    use super::wordreg::Wx2;
+    use super::u32mask::U32Mask;
     use num_derive::{FromPrimitive, ToPrimitive};
 
 
@@ -1286,7 +1311,8 @@ pub mod adcmask {
 
 pub mod iomask {
 
-    use super::u32mask::{Wx1, U32Mask};
+    use super::wordreg::Wx1;
+    use super::u32mask::U32Mask;
 
 
     /// I/O channel configuration bitmask.
