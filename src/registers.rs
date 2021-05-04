@@ -176,6 +176,135 @@ pub mod duration {
     }
 }
 
+
+pub mod hsdelay {
+    use super::ToU32s;
+    use bitvec::prelude::{Msb0, BitVec};
+    use std::time::Duration;
+    use num_derive::*;
+
+    /// High Speed DAC clusters to manipulate
+    #[derive(Clone, Copy, FromPrimitive, ToPrimitive, Debug)]
+    #[repr(usize)]
+    pub enum DACCluster {
+        /// Cluster 0
+        CL0 = 0,
+        /// Cluster 1
+        CL1 = 1,
+        /// Cluster 2
+        CL2 = 2,
+        /// Cluster 3
+        CL3 = 3,
+        /// Cluster 4
+        CL4 = 4,
+        /// Cluster 5
+        CL5 = 5,
+        /// Cluster 6
+        CL6 = 6,
+        /// Cluster 7
+        CL7 = 7
+    }
+
+    /// Delays for high speed pulse drivers
+    ///
+    /// This register is used to configure the delays of the high speed
+    /// pulse drivers. It is essentially a 224-bit integer containing
+    /// all cluster timings adhering to following layout.
+    ///
+    /// ```text
+    /// [CL7][CL6][CL5][CL4][CL3][CL2][CL1][CL0]
+    ///                                       ^
+    ///                                       |
+    ///                                       +-- LSB
+    /// ```
+    ///
+    /// ## Example
+    /// ```
+    /// use libarc2::register::{HSDelay, ToU32s, DACCluster};
+    /// use std::time::Duration;
+    ///
+    /// let mut delay = HSDelay::new();
+    ///
+    /// // Set cluster 0 to 100 ns
+    /// delay.set_cluster_nanos(DACCluster::CL0, 100);
+    /// assert_eq!(delay.as_u32s(), [0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa]);
+    ///
+    /// // And back to 0
+    /// delay.set_cluster_nanos(DACCluster::CL0, 0);
+    /// assert_eq!(delay.as_u32s(), [0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]);
+    ///
+    /// // Set cluster 1 to 220 ns
+    /// delay.set_cluster_nanos(DACCluster::CL1, 220);
+    /// assert_eq!(delay.as_u32s(), [0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x60000000]);
+    ///
+    /// // And also cluster 0 to 300 ns using a Duration
+    /// delay.set_cluster_from_duration(DACCluster::CL0, &Duration::from_nanos(300));
+    /// assert_eq!(delay.as_u32s(), [0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x6000001e]);
+    /// ```
+    pub struct HSDelay {
+        bits: BitVec<Msb0, u32>
+    }
+
+    impl HSDelay {
+
+        const RESOLUTION: u128 = 10u128;
+        const MAX_DELAY: u128 = Self::RESOLUTION * 2u128.pow(28);
+        const CLUSTERS: usize = 8;
+        const CLUSTSIZE: usize = 28;
+
+        #[doc(hidden)]
+        fn steps_to_bools(val: u32) -> [bool; Self::CLUSTSIZE] {
+            let mut bools: [bool; Self::CLUSTSIZE] = [false; Self::CLUSTSIZE];
+            for i in 0..Self::CLUSTSIZE {
+                bools[i] = ( (val as u32 >> i) & 1 ) == 1
+            }
+            bools
+        }
+
+        /// Create a new delay with all clusters set to 0
+        pub fn new() -> HSDelay {
+            HSDelay { bits: BitVec::repeat(false, Self::CLUSTERS*Self::CLUSTSIZE) }
+        }
+
+        /// Set the delay of a cluster to a specified amount of ns. This is in
+        /// increments of 10 ns (100 MHz clock). Delays will be capped to
+        /// 2^{28} × 10 ns.
+        pub fn set_cluster_nanos(&mut self, cluster: DACCluster, val: u128) {
+            let steps = if val > Self::MAX_DELAY {
+                Self::MAX_DELAY / Self::RESOLUTION
+            } else {
+                val / Self::RESOLUTION
+            } as u32;
+
+            let bools = HSDelay::steps_to_bools(steps);
+
+            let bits = self.bits.as_mut_bitslice();
+
+            let cluster = cluster as usize;
+
+            for i in 0..bools.len() {
+                bits.set(Self::CLUSTSIZE*(Self::CLUSTERS-1-cluster) + i,
+                    bools[Self::CLUSTSIZE - 1 - i]);
+            }
+
+        }
+
+        /// Same as [`set_cluster_nanos`][`Self::set_cluster_nanos`] but with a
+        /// [`Duration`] argument instead.
+        pub fn set_cluster_from_duration(&mut self, cluster: DACCluster, val: &Duration) {
+            self.set_cluster_nanos(cluster, val.as_nanos());
+        }
+    }
+
+    impl ToU32s for HSDelay {
+        fn as_u32s(&self) -> Vec<u32> {
+            self.bits.as_raw_slice().to_vec()
+        }
+    }
+
+}
+
+
 pub mod address {
     use super::ToU32s;
     use num_derive::{FromPrimitive, ToPrimitive};
