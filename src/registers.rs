@@ -1185,16 +1185,16 @@ pub mod u32mask {
     }
 
     impl U32Mask<Wx3> {
-        pub fn new() -> U32Mask<Wx1> {
+        pub fn new() -> U32Mask<Wx3> {
             let vec: BitVec<Msb0, u32> = BitVec::repeat(false, Wx3::WORDS*32);
-            U32Mask { _words: Wx1{}, bits: vec }
+            U32Mask { _words: Wx3{}, bits: vec }
         }
     }
 
     impl U32Mask<Wx4> {
-        pub fn new() -> U32Mask<Wx2> {
+        pub fn new() -> U32Mask<Wx4> {
             let vec: BitVec<Msb0, u32> = BitVec::repeat(false, Wx4::WORDS*32);
-            U32Mask { _words: Wx2{}, bits: vec }
+            U32Mask { _words: Wx4{}, bits: vec }
         }
     }
 }
