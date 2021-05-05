@@ -3,7 +3,8 @@ use crate::register::Terminate;
 use crate::register::{OpCode, Empty, DACMask, DACVoltage};
 use crate::register::{ChannelConf, SourceConf, ChannelState};
 use crate::register::{IOEnable, IOMask, ADCMask, Averaging};
-use crate::register::{Duration50, Address};
+use crate::register::{Duration50, Address, HSDelay, DACCluster};
+use num_traits::FromPrimitive;
 
 macro_rules! make_vec_instr_impl {
     ($t:ident, $f:ident) => {
@@ -654,6 +655,112 @@ impl VoltageRead {
 }
 
 impl Instruction for VoltageRead { make_vec_instr_impl!(VoltageRead, instrs); }
+
+
+/// Setup High Speed drivers
+///
+/// This instruction is used to prepare the high speed driver for ultra-fast
+/// pulsing.
+///
+/// ## Instruction layout
+///
+/// ```test
+///        +--------+-----------+
+///        | OpCode |  HSDelay  |
+///        +--------+-----------+
+/// Words:     1          7
+/// ```
+///
+/// ## Example
+/// ```
+/// use libarc2::{HSConfig, Instruction};
+/// use std::time::Duration;
+///
+/// // Configure cluster 0 to 110 ns, disable the rest
+/// // DAC cluster:   0    1    2    3    4    5    6    7
+/// let timings0 = [110,   0,   0,   0,   0,   0,   0,   0];
+///
+/// let mut conf0 = HSConfig::new(timings0);
+///
+/// // Real value is 10 ns lower to account for settling time
+/// assert_eq!(conf0.compile().view(),
+///     &[0x100, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa, 0x80008000]);
+///
+/// let timings1 = [&Duration::from_nanos(110),
+///                 &Duration::from_nanos(0),
+///                 &Duration::from_nanos(0),
+///                 &Duration::from_nanos(0),
+///                 &Duration::from_nanos(0),
+///                 &Duration::from_nanos(0),
+///                 &Duration::from_nanos(0),
+///                 &Duration::from_nanos(0)];
+///
+/// let mut conf1 = HSConfig::new_from_durations(timings1);
+///
+/// assert_eq!(conf1.compile().view(),
+///     &[0x100, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xa, 0x80008000]);
+/// ```
+pub struct HSConfig {
+    instrs: Vec<u32>
+}
+
+impl HSConfig {
+
+    const MIN_DELAY: u32 = 40;
+    const DEAD_TIME: u32 = 10;
+
+    /// Create a new High Speed driver config with specified timings. Minimum
+    /// supported delay is 40 ns and max is 2.68 s. You can still set a
+    /// cluster to 0 for immediate transitions (or non high speed clusters)
+    /// but values between 1 and 40 will be capped to 40 ns. For pulses longer
+    /// than 200 ms the use of individual bias + delay steps is recommended
+    /// instead.
+    pub fn new(timings: [u32; 8]) -> Self {
+
+        let mut instr = Self::create();
+
+        let mut delays = HSDelay::new();
+        for i in 0..timings.len() {
+            // 0 is a valid value, but anything between 1 and 40 (incl.) is
+            // capped to 40 ns.
+            let actual_timing = if timings[i] == 0 {
+                0u32
+            } else if timings[i] > 0 && timings[i] <= Self::MIN_DELAY {
+                Self::MIN_DELAY - Self::DEAD_TIME
+            } else {
+                timings[i] - Self::DEAD_TIME
+            };
+
+            // This is OK to unwrap since the cluster number can't go over
+            // 7 as a result of the iteration
+            delays.set_cluster_nanos(DACCluster::from_usize(i).unwrap(),
+                actual_timing as u128);
+        }
+
+        instr.push_register(&OpCode::HSPulseConfig);
+        instr.push_register(&delays);
+
+        instr
+
+    }
+
+    /// Same as [`HSConfig::new()`] but with [`Duration`][`std::time::Duration`]
+    /// arguments instead.
+    pub fn new_from_durations(timings: [&std::time::Duration; 8]) -> Self {
+
+        let mut delays: [u32; 8] = [0u32; 8];
+        for i in 0..timings.len() {
+            delays[i] = timings[i].as_nanos() as u32;
+        }
+
+        HSConfig::new(delays)
+
+    }
+
+}
+
+impl Instruction for HSConfig { make_vec_instr_impl!(HSConfig, instrs); }
+
 
 /// Reset hardware to default state
 ///
