@@ -4,6 +4,7 @@ use crate::register::{OpCode, Empty, DACMask, DACVoltage};
 use crate::register::{ChannelConf, SourceConf, ChannelState};
 use crate::register::{IOEnable, IOMask, ADCMask, Averaging};
 use crate::register::{Duration50, Address, HSDelay, DACCluster};
+use crate::register::{ClusterMask, PulseAttrs};
 use num_traits::FromPrimitive;
 
 macro_rules! make_vec_instr_impl {
@@ -760,6 +761,67 @@ impl HSConfig {
 }
 
 impl Instruction for HSConfig { make_vec_instr_impl!(HSConfig, instrs); }
+
+
+/// Initiate a high speed pulse operation
+///
+/// This instruction typically follows a [`HSConfig`] instruction and
+/// actually initiates the high speed pulsing operation specified before.
+///
+/// ## Instruction layout
+///
+/// ```text
+///        +--------+------------+
+///        | OpCode | PulseAttrs |
+///        +--------+------------+
+/// Words:     1          1
+/// ```
+///
+/// ## Example
+///
+/// ```
+/// use libarc2::{HSConfig, HSPulse, Instruction};
+/// use libarc2::register::{PulseAttrs, ClusterMask, ToU32s};
+///
+/// // Configure cluster 0 for 110 ns pulses
+/// let mut config  = HSConfig::new([110, 0, 0, 0, 0, 0, 0, 0]);
+///
+/// // arc2.process_compile(&config);
+///
+/// // Initiate a pulse on cluster 0
+/// let mut pulse = HSPulse::new(ClusterMask::CL0);
+///
+/// // arc2.process_compile(&pulse);
+///
+/// assert_eq!(pulse.compile().view(), &[0x200, 0x00010000, 0x0,
+///                                       0x0, 0x0, 0x0, 0x0, 0x0,
+///                                       0x80008000]);
+/// ```
+pub struct HSPulse {
+    instrs: Vec<u32>
+}
+
+impl HSPulse {
+
+    /// Initiate a high speed pulse operation on the specified DAC
+    /// clusters. This assumes normal low/high/low operation. For
+    /// more elaborate pulsing schemes use
+    /// [`new_from_attrs()`][`Self::new_from_attrs`] with custom
+    /// [`PulseAttrs`].
+    pub fn new(clusters: ClusterMask) -> Self {
+        Self::new_from_attrs(&PulseAttrs::new(clusters))
+    }
+
+    pub fn new_from_attrs(attrs: &PulseAttrs) -> Self {
+        let mut instr = Self::create();
+        instr.push_register(&OpCode::HSPulseStart);
+        instr.push_register(attrs);
+
+        instr
+    }
+}
+
+impl Instruction for HSPulse { make_vec_instr_impl!(HSPulse, instrs); }
 
 
 /// Reset hardware to default state
