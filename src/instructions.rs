@@ -1,10 +1,12 @@
-use crate::register::ToU32s;
-use crate::register::Terminate;
-use crate::register::{OpCode, Empty, DACMask, DACVoltage};
-use crate::register::{ChannelConf, SourceConf, ChannelState};
-use crate::register::{IOEnable, IOMask, ADCMask, Averaging};
-use crate::register::{Duration50, Address, HSDelay, DACCluster};
-use crate::register::{ClusterMask, PulseAttrs};
+//! Commands processable by ArC2
+
+use crate::registers::ToU32s;
+use crate::registers::Terminate;
+use crate::registers::{OpCode, Empty, DACMask, DACVoltage};
+use crate::registers::{ChannelConf, SourceConf, ChannelState};
+use crate::registers::{IOEnable, IOMask, ADCMask, Averaging};
+use crate::registers::{Duration50, Address, HSDelay, DACCluster};
+use crate::registers::{ClusterMask, PulseAttrs};
 use num_traits::FromPrimitive;
 
 macro_rules! make_vec_instr_impl {
@@ -68,7 +70,8 @@ pub trait Instruction {
     /// [`compile_process`][`crate::Instrument::compile_process`] functions.
     ///
     /// ```ignore
-    /// use libarc2::{Instrument, ResetDAC, Instruction};
+    /// use libarc2::{Instrument};
+    /// use libarc2::instructions::{ResetDAC, Instruction};
     ///
     /// let arc2 = Instrument::open_with_fw(0, "fw.bin").unwrap();
     ///
@@ -196,8 +199,8 @@ impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs); }
 ///
 /// ## Example
 /// ```
-/// use libarc2::register::{DACMask, DACVoltage, ToU32s};
-/// use libarc2::{SetDAC, Instruction};
+/// use libarc2::registers::{DACMask, DACVoltage, ToU32s};
+/// use libarc2::instructions::{SetDAC, Instruction};
 ///
 /// // Enable first two half channels (8 channels)
 /// let mut mask = DACMask::NONE;
@@ -315,8 +318,8 @@ impl Instruction for SetDAC { make_vec_instr_impl!(SetDAC, instrs); }
 ///
 /// ## Example
 /// ```
-/// use libarc2::register::{ChannelConf, SourceConf, ChannelState};
-/// use libarc2::{UpdateChannel, Instruction};
+/// use libarc2::registers::{ChannelConf, SourceConf, ChannelState};
+/// use libarc2::instructions::{UpdateChannel, Instruction};
 ///
 /// // new channel configuration
 /// let mut chanconf = ChannelConf::new();
@@ -368,8 +371,8 @@ impl UpdateChannel {
     /// Create a new instruction with default source and specified state
     ///
     /// ```
-    /// use libarc2::register::{ChannelState};
-    /// use libarc2::{UpdateChannel, Instruction};
+    /// use libarc2::registers::{ChannelState};
+    /// use libarc2::instructions::{UpdateChannel, Instruction};
     ///
     /// // Arbitrary voltage output
     /// let state = ChannelState::VoltArb;
@@ -414,7 +417,7 @@ impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs)
 /// The `Delay` instruction is used to configure to insert delays into the ArC2
 /// command buffer. This can be used for settling other instructions or creating
 /// arbitrary waveforms. The delay is essentially a 50 MHz timer as described in
-/// the documentation of [`Duration50`][`crate::register::Duration50`]. The
+/// the documentation of [`Duration50`][`crate::registers::Duration50`]. The
 /// maximum delay we can implement on board is `2^32 × 20 ns` although realistically
 /// for delays greater than a second one might want to use software delays. Values
 /// exceeding this maximum will be capped to fit. We cannot also do delays lower than
@@ -433,7 +436,7 @@ impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs)
 ///
 /// ## Example
 /// ```
-/// use libarc2::{Delay, Instruction};
+/// use libarc2::instructions::{Delay, Instruction};
 /// use std::time::Duration;
 ///
 /// // Delays are rounded to the lowest increment of 20 ns
@@ -504,7 +507,7 @@ impl Instruction for Delay { make_vec_instr_impl!(Delay, instrs); }
 ///
 /// ## Example
 /// ```
-/// use libarc2::{UpdateLogic, Instruction};
+/// use libarc2::instructions::{UpdateLogic, Instruction};
 ///
 /// // Create a new update logic instruction setting all i/o as
 /// // output (first argument) and enabling them (second argument).
@@ -552,7 +555,7 @@ impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
 /// Perform a current read operation on selected channels.
 ///
 /// This will create a new current read operation on selected channels.
-/// See documentation on [`ADCMask`][`crate::register::ADCMask`] on how
+/// See documentation on [`ADCMask`][`crate::registers::ADCMask`] on how
 /// to select one or more input channels.
 ///
 /// ## Instruction layout
@@ -567,8 +570,8 @@ impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
 /// ## Example
 ///
 /// ```
-/// use libarc2::register::{ADCMask, Address};
-/// use libarc2::{CurrentRead, Instruction};
+/// use libarc2::registers::{ADCMask, Address};
+/// use libarc2::instructions::{CurrentRead, Instruction};
 ///
 /// // Select channels 31, 0, 62
 /// let mut mask = ADCMask::new();
@@ -604,7 +607,7 @@ impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
 /// Perform a voltage read operation on selected channels.
 ///
 /// This will create a new voltage read operation on selected channels.
-/// See documentation on [`ADCMask`][`crate::register::ADCMask`] on how
+/// See documentation on [`ADCMask`][`crate::registers::ADCMask`] on how
 /// to select one or more input channels.
 ///
 /// ## Instruction layout
@@ -619,8 +622,8 @@ impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
 /// ## Example
 ///
 /// ```
-/// use libarc2::register::{ADCMask, Address};
-/// use libarc2::{VoltageRead, Instruction};
+/// use libarc2::registers::{ADCMask, Address};
+/// use libarc2::instructions::{VoltageRead, Instruction};
 ///
 /// // Select channels 31, 0, 62
 /// let mut mask = ADCMask::new();
@@ -674,7 +677,7 @@ impl Instruction for VoltageRead { make_vec_instr_impl!(VoltageRead, instrs); }
 ///
 /// ## Example
 /// ```
-/// use libarc2::{HSConfig, Instruction};
+/// use libarc2::instructions::{HSConfig, Instruction};
 /// use std::time::Duration;
 ///
 /// // Configure cluster 0 to 110 ns, disable the rest
@@ -780,8 +783,8 @@ impl Instruction for HSConfig { make_vec_instr_impl!(HSConfig, instrs); }
 /// ## Example
 ///
 /// ```
-/// use libarc2::{HSConfig, HSPulse, Instruction};
-/// use libarc2::register::{PulseAttrs, ClusterMask, ToU32s};
+/// use libarc2::instructions::{HSConfig, HSPulse, Instruction};
+/// use libarc2::registers::{PulseAttrs, ClusterMask, ToU32s};
 ///
 /// // Configure cluster 0 for 110 ns pulses
 /// let mut config  = HSConfig::new([110, 0, 0, 0, 0, 0, 0, 0]);
@@ -853,9 +856,8 @@ impl Instruction for Clear { make_vec_instr_impl!(Clear, instrs); }
 #[cfg(test)]
 mod tests {
 
-    use crate::register::*;
-    use super::{ResetDAC, UpdateDAC, SetDAC, UpdateChannel, Clear, Instruction};
-    use super::{UpdateLogic, CurrentRead, VoltageRead};
+    use crate::registers::*;
+    use crate::instructions::*;
 
     #[test]
     fn new_reset_dac() {
