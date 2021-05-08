@@ -9,7 +9,7 @@ const BASEADDR: u32 = 0x80000000;
 const WRITEDELAY: time::Duration = time::Duration::from_millis(3);
 const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
-const INBUF: usize = 32*std::mem::size_of::<u32>();
+const INBUF: usize = 64*std::mem::size_of::<u32>();
 
 
 // We are caching common instructions
