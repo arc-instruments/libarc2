@@ -171,8 +171,8 @@ impl Instrument {
     }
 
     /// Read raw data from block memory
-    pub fn read_raw(&self) -> Result<Vec<u8>, String> {
-        match self.efm.read_block(BASEADDR, INBUF as i32, BLFLAGS_R) {
+    pub fn read_raw(&self, addr: u32) -> Result<Vec<u8>, String> {
+        match self.efm.read_block(addr, INBUF as i32, BLFLAGS_R) {
             Ok(buf) => { pktdbg!(buf); Ok(buf) },
             Err(err) => Err(format!("Could not read block memory: {}", err))
         }
