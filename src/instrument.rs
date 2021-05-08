@@ -37,9 +37,14 @@ lazy_static! {
 /// ArC2 entry level object
 ///
 /// `Instrument` implements the frontend for the ArC2. Its role is essentially
-/// to process instructions and read back results.
+/// to process instructions and read back results. ArC2 processes instructions
+/// either in _immediate_ mode or _retained_ mode. In the first case instructions
+/// are written to the tool as soon they are issued. In retained mode
+/// instructions will be gathered into a buffer which **must** be flushed
+/// explicitly for them to have any effect.
 pub struct Instrument {
-    efm: bl::Device
+    efm: bl::Device,
+    instr_buffer: Option<Vec<u8>>
 }
 
 /// Find available device IDs.
@@ -64,13 +69,27 @@ pub fn find_ids() -> Result<Vec<i32>, String> {
 impl Instrument {
 
     /// Create a new Instrument with a known ID.  Use [`find_ids`]
-    /// to discover devices.
-    pub fn open(id: i32) -> Result<Instrument, String> {
+    /// to discover devices. Set `retained_mode` to `true` to defer
+    /// writing instructions until an [`Instrument::flush()`]
+    /// has been called explicitly.
+    pub fn open(id: i32, retained_mode: bool) -> Result<Instrument, String> {
 
         find_ids()?;
+        let buffer: Option<Vec<u8>>;
+
+        // If in retained mode preallocate space for 512 instructions.
+        // If not the instruction buffer is not used.
+        if retained_mode {
+            buffer = Some(Vec::with_capacity(512*9*std::mem::size_of::<u32>()));
+        } else {
+            buffer = None;
+        }
 
         match bl::Device::open(id) {
-            Ok(d) => Ok(Instrument { efm: d }),
+            Ok(d) => Ok(Instrument {
+                efm: d,
+                instr_buffer: buffer
+            }),
             Err(err) => Err(format!("Could not open device: {}", err))
         }
     }
@@ -86,20 +105,30 @@ impl Instrument {
     /// Open a new Instrument with a specified id and bitstream.
     /// This essentially combines [`Instrument::open()`] and
     /// [`Instrument::load_firmware()`].
-    pub fn open_with_fw(id: i32, path: &str) -> Result<Instrument, String> {
-        let instr = Instrument::open(id)?;
+    pub fn open_with_fw(id: i32, path: &str, retained_mode: bool) -> Result<Instrument, String> {
+        let mut instr = Instrument::open(id, retained_mode)?;
         instr.load_firmware(&path)?;
         instr.process(&*RESET_DAC)?;
         instr.process(&*SET_3V3_LOGIC)?;
         instr.process(&*UPDATE_DAC)?;
+        instr.flush()?;
 
         Ok(instr)
     }
 
     /// Process a compiled instruction
-    pub fn process<T: Instruction>(&self, instr: &T) -> Result<(), String> {
+    pub fn process<T: Instruction>(&mut self, instr: &T) -> Result<(), String> {
 
         instrdbg!(instr);
+
+        // If an instruction buffer is used write the bytes to the buffer
+        // instead of directly to the tool.
+        if let Some(buff) = &mut self.instr_buffer {
+            buff.extend(instr.to_bytevec());
+            return Ok(());
+        }
+
+        // Otherwise write directly to ArC2
         match self.efm.write_block(BASEADDR, &mut instr.to_bytevec(), BLFLAGS_W) {
 
             Ok(()) => {
@@ -111,8 +140,31 @@ impl Instrument {
         Ok(())
     }
 
+    /// Write all retained instructions to ArC2. Has no effect if
+    /// `retained_mode` is `false`.
+    pub fn flush(&mut self) -> Result<(), String> {
+
+        // If an instruction buffer is used empty it, otherwise do
+        // nothing as all writes are immediates
+        match self.instr_buffer {
+            Some(ref mut buf) => {
+                match self.efm.write_block(BASEADDR, buf, BLFLAGS_W) {
+                    Ok(()) => {
+                        thread::sleep(WRITEDELAY);
+                        buf.clear();
+                        Ok(())
+                    },
+                    Err(err) => Err(format!("Could not write buffer: {}", err))
+                }
+            },
+            None => Ok(())
+        }
+
+
+    }
+
     /// Compiles and process an instruction
-    pub fn compile_process<T: Instruction>(&self, instr: &mut T) -> Result<(), String> {
+    pub fn compile_process<T: Instruction>(&mut self, instr: &mut T) -> Result<(), String> {
 
         self.process(instr.compile())
 
@@ -126,20 +178,20 @@ impl Instrument {
         }
     }
 
-    /// Reset all DACs on the tool
-    pub fn reset_dacs(&self) -> Result<(), String> {
+    /// Reset all DACs on the tool.
+    pub fn reset_dacs(&mut self) -> Result<(), String> {
         self.process(&*RESET_DAC)?;
         self.load_dacs()
     }
 
     /// Set global 3.3 V logic level
-    pub fn set_3v3_logic(&self) -> Result<(), String> {
+    pub fn set_3v3_logic(&mut self) -> Result<(), String> {
         self.process(&*SET_3V3_LOGIC)?;
         self.load_dacs()
     }
 
     /// Update the DAC configuration
-    pub fn load_dacs(&self) -> Result<(), String> {
+    pub fn load_dacs(&mut self) -> Result<(), String> {
         self.process(&*UPDATE_DAC)
     }
 

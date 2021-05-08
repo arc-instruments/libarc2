@@ -11,7 +11,7 @@ mod hardware {
 
         println!("\nRunning open_device 0");
 
-        match libarc2::Instrument::open(0i32) {
+        match libarc2::Instrument::open(0i32, false) {
             Ok(_) => { println!("Device opened successfully"); }
             Err(err) => { panic!("Could not open device: {}", err); }
         }
@@ -34,7 +34,7 @@ mod hardware {
             }
         };
 
-        let device = libarc2::Instrument::open(0i32).unwrap();
+        let device = libarc2::Instrument::open(0i32, false).unwrap();
 
         println!("Device opened succesfully");
         println!("Loading firmware from: {}", path);
@@ -62,7 +62,7 @@ mod hardware {
             }
         };
 
-        let _device = libarc2::Instrument::open_with_fw(0i32, &path).unwrap();
+        let _device = libarc2::Instrument::open_with_fw(0i32, &path, false).unwrap();
 
     }
 
@@ -82,7 +82,7 @@ mod hardware {
             }
         };
 
-        let device = libarc2::Instrument::open(0i32).unwrap();
+        let device = libarc2::Instrument::open(0i32, false).unwrap();
 
         println!("Device opened succesfully");
         println!("Loading firmware from: {}", path);
