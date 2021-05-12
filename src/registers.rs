@@ -90,7 +90,7 @@ mod consts {
     ];
 
 
-    pub(super) const CHANCONFSIZE: usize = 3;
+    pub(super) const CHANCONFSIZE: usize = 2;
     pub(super) const NCHANS: usize = 64;
 }
 
@@ -704,19 +704,15 @@ mod dacmask_tests {
 #[derive(Clone, Copy, FromPrimitive, Debug)]
 #[repr(u8)]
 pub enum ChannelState {
+    /// Keep current state
+    Maintain = 0b00,
     /// Open channel; channel will not be connected
     /// to anything.
-    Open = 0b001,
-    /// Channel is GND
-    CloseGND = 0b010,
-    /// Channel cap to GND
-    CapGND = 0b011,
+    Open = 0b01,
     /// Channel is set for arbitrary voltage operation
-    VoltArb = 0b100,
-    /// Channel is set for arbitrary current operation
-    CurArb = 0b101,
+    VoltArb = 0b10,
     /// High-Speed pulse channel
-    HiSpeed = 0b110,
+    HiSpeed = 0b11,
 }
 
 impl ChannelState {
@@ -980,13 +976,10 @@ mod channelconf_tests {
 
     #[test]
     fn bools_to_status() {
-        let status0 = ChannelState::from(&[false, true, false]);
-        assert_matches!(status0, ChannelState::CloseGND);
-
-        let status1 = ChannelState::from(&[true, false, false]);
+        let status1 = ChannelState::from(&[true, false]);
         assert_matches!(status1, ChannelState::VoltArb);
 
-        let status2 = ChannelState::from(&[false, false, true]);
+        let status2 = ChannelState::from(&[false, true]);
         assert_matches!(status2, ChannelState::Open);
     }
 
@@ -1001,12 +994,10 @@ mod channelconf_tests {
 
         let slice = v.as_u32s();
 
-        assert_eq!(slice[0], 0x92492492);
-        assert_eq!(slice[1], 0x49249249);
-        assert_eq!(slice[2], 0x24924924);
-        assert_eq!(slice[3], 0x92492492);
-        assert_eq!(slice[4], 0x49249249);
-        assert_eq!(slice[5], 0x24924924);
+        assert_eq!(slice[0], 0xaaaaaaaa);
+        assert_eq!(slice[1], 0xaaaaaaaa);
+        assert_eq!(slice[2], 0xaaaaaaaa);
+        assert_eq!(slice[3], 0xaaaaaaaa);
     }
 
     #[test]
@@ -1019,12 +1010,10 @@ mod channelconf_tests {
 
         let slice = v.as_u32s();
 
-        assert_eq!(slice[0], 0x92492492);
-        assert_eq!(slice[1], 0x49249249);
-        assert_eq!(slice[2], 0x24924924);
-        assert_eq!(slice[3], 0x92492492);
-        assert_eq!(slice[4], 0x49249249);
-        assert_eq!(slice[5], 0x24924924);
+        assert_eq!(slice[0], 0xaaaaaaaa);
+        assert_eq!(slice[1], 0xaaaaaaaa);
+        assert_eq!(slice[2], 0xaaaaaaaa);
+        assert_eq!(slice[3], 0xaaaaaaaa);
     }
 }
 
@@ -1043,7 +1032,7 @@ pub enum CurrentSourceState {
     Open       = 0b00000001,
     /// Arbitrary voltage operation
     VoltageArb = 0b00000010,
-    /// High speed pulse operation
+    /// High speed voltage pulse operation
     HiSpeed    = 0b00000011
 }
 

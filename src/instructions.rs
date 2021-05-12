@@ -333,8 +333,8 @@ impl Instruction for SetDAC { make_vec_instr_impl!(SetDAC, instrs); }
 /// let mut instr = UpdateChannel::from_regs(&sourceconf, &chanconf);
 ///
 /// assert_eq!(instr.compile().view(), &[0x40, 0x73400000,
-///     0x92492492, 0x49249249, 0x24924924, 0x92492492,
-///     0x49249249, 0x24924924, 0x80008000]);
+///     0x00000000, 0x00000000, 0xaaaaaaaa, 0xaaaaaaaa,
+///     0xaaaaaaaa, 0xaaaaaaaa, 0x80008000]);
 /// ```
 pub struct UpdateChannel {
     instrs: Vec<u32>
@@ -345,7 +345,8 @@ impl UpdateChannel {
     /// Create a new instruction with invalid state.
     pub fn new() -> Self {
         Self::from_registers(&[&OpCode::UpdateChannel,
-            &SourceConf::new(), &ChannelConf::new()])
+            &SourceConf::new(), &Empty::new(), &Empty::new(),
+            &ChannelConf::new()])
     }
 
     /// Create a new instruction from existing configuration.
@@ -353,6 +354,8 @@ impl UpdateChannel {
         let mut instr = Self::create();
         instr.push_register(&OpCode::UpdateChannel);
         instr.push_register(sourceconf);
+        instr.push_register(&Empty::new());
+        instr.push_register(&Empty::new());
         instr.push_register(chanconf);
 
         instr
@@ -363,6 +366,8 @@ impl UpdateChannel {
         let mut instr = UpdateChannel::create();
         instr.push_register(&OpCode::UpdateChannel);
         instr.push_register(&SourceConf::new());
+        instr.push_register(&Empty::new());
+        instr.push_register(&Empty::new());
         instr.push_register(chanconf);
 
         instr
@@ -380,8 +385,8 @@ impl UpdateChannel {
     /// let mut instr = UpdateChannel::from_regs_global_state(state);
     ///
     /// assert_eq!(instr.compile().view(), &[0x40, 0x73400000,
-    ///     0x92492492, 0x49249249, 0x24924924, 0x92492492,
-    ///     0x49249249, 0x24924924, 0x80008000]);
+    ///     0x00000000, 0x00000000, 0xaaaaaaaa, 0xaaaaaaaa,
+    ///     0xaaaaaaaa, 0xaaaaaaaa, 0x80008000]);
     ///
     /// ```
     pub fn from_regs_global_state(state: ChannelState) -> Self {
@@ -1036,18 +1041,18 @@ mod tests {
         let mut instr = UpdateChannel::from_regs(&sourceconf, &chanconf);
 
         assert_eq!(instr.compile().view(), &[0x40, 0x73400000,
-            0x92492492, 0x49249249, 0x24924924, 0x92492492,
-            0x49249249, 0x24924924, 0x80008000]);
+            0x00000000, 0x00000000, 0xaaaaaaaa, 0xaaaaaaaa,
+            0xaaaaaaaa, 0xaaaaaaaa, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
             &[0x40, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x40, 0x73,
-              0x92, 0x24, 0x49, 0x92,
-              0x49, 0x92, 0x24, 0x49,
-              0x24, 0x49, 0x92, 0x24,
-              0x92, 0x24, 0x49, 0x92,
-              0x49, 0x92, 0x24, 0x49,
-              0x24, 0x49, 0x92, 0x24,
+              0x00, 0x00, 0x00, 0x00,
+              0x00, 0x00, 0x00, 0x00,
+              0xaa, 0xaa, 0xaa, 0xaa,
+              0xaa, 0xaa, 0xaa, 0xaa,
+              0xaa, 0xaa, 0xaa, 0xaa,
+              0xaa, 0xaa, 0xaa, 0xaa,
               0x00, 0x80, 0x00, 0x80]);
     }
 
