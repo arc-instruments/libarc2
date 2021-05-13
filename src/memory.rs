@@ -7,7 +7,7 @@ const DRAM_BASE: u32 = 0x0000_0000;
 
 /// Error type for memory operations
 #[derive(Debug)]
-enum MemoryError {
+pub(crate) enum MemoryError {
     ENOMEM,
     EDFREE,
 }
@@ -29,7 +29,7 @@ impl std::error::Error for MemoryError {}
 /// A chunk represents a region in the FPGA DRAM that has been marked
 /// as active, which means ArC2 has been instructed to put measurement
 /// data there.
-struct Chunk {
+pub(crate) struct Chunk {
     _addr: u32,
     _valid: bool
 }
@@ -46,12 +46,12 @@ impl std::fmt::Debug for Chunk {
 impl Chunk {
 
     /// Create a new Chunk at the specified address
-    fn new(addr: u32) -> Self {
+    pub fn new(addr: u32) -> Self {
         Chunk { _addr: addr, _valid: true }
     }
 
     /// The memory associated with this chunk
-    fn addr(&self) -> u32 {
+    pub fn addr(&self) -> u32 {
         self._addr
     }
 
@@ -94,7 +94,7 @@ impl Chunk {
 /// responsibility of the caller to free the chunks whose data have
 /// been picked up otherwise the FPGA will run, eventually, out of
 /// memory.
-struct MemMan {
+pub(crate) struct MemMan {
     // Highest available address
     top: u32,
     // Total blocks available to allocate
@@ -110,7 +110,7 @@ impl MemMan {
 
     /// Initialise a new memory manager with the default
     /// memory layout.
-    fn new() -> Self {
+    pub fn new() -> Self {
 
         MemMan {
             top: DRAM_BASE,
@@ -140,7 +140,7 @@ impl MemMan {
     /// no guarantee that this chunk will be sequential compared
     /// to a previous allocation as the allocator will try to
     /// reuse memory as much as possible.
-    fn alloc_chunk(&mut self) -> Result<Chunk, MemoryError> {
+    pub fn alloc_chunk(&mut self) -> Result<Chunk, MemoryError> {
         if self.free_blocks == 0 {
             return Err(MemoryError::ENOMEM);
         }
@@ -164,7 +164,7 @@ impl MemMan {
 
     /// Release the address represented by a [`Chunk`] back into the
     /// available memory pool.
-    fn free_chunk(&mut self, chunk: &mut Chunk) -> Result<(), MemoryError> {
+    pub fn free_chunk(&mut self, chunk: &mut Chunk) -> Result<(), MemoryError> {
         if !chunk.is_valid() {
             return Err(MemoryError::EDFREE);
         }
