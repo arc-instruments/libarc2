@@ -2,6 +2,8 @@ use std::{time, thread};
 use beastlink as bl;
 
 use crate::instructions::*;
+use crate::registers::{DACMask, DACVoltage, ChannelState, ADCMask};
+use crate::memory::{MemMan};
 
 const EFM03_VID: u16 = 0x10f8;
 const EFM03_PID: u16 = 0xc583;
@@ -11,6 +13,40 @@ const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
 const INBUF: usize = 64*std::mem::size_of::<u32>();
 
+
+/// Channel assignment in the ADC readout is not linear. This map
+/// matches the channel number (the index of the array) with an
+/// index in the readout array (first element of the tuple) and
+/// additionally a polarity adjustment factor (second element of
+/// the tuple). In order to find out the current sunk by a channel
+/// the ADC output must be multiplied by the correction factor
+/// in this array.
+const CHAN2ADCIDX: [(usize, f32); 64] = [
+    // ADC Cluster 0
+    ( 0,  1.0), ( 2, -1.0), ( 1,  1.0), ( 3, -1.0),
+    ( 4,  1.0), ( 6, -1.0), ( 5,  1.0), ( 7, -1.0),
+    // ADC Cluster 1
+    ( 8,  1.0), (10, -1.0), ( 9,  1.0), (11, -1.0),
+    (12,  1.0), (14, -1.0), (13,  1.0), (15, -1.0),
+    // ADC Cluster 2
+    (16,  1.0), (18, -1.0), (17,  1.0), (19, -1.0),
+    (20,  1.0), (22, -1.0), (21,  1.0), (23, -1.0),
+    // ADC Cluster 3
+    (24,  1.0), (26, -1.0), (25,  1.0), (27, -1.0),
+    (28,  1.0), (30, -1.0), (29,  1.0), (31, -1.0),
+    // ADC Cluster 4
+    (32,  1.0), (34, -1.0), (33,  1.0), (35, -1.0),
+    (36,  1.0), (38, -1.0), (37,  1.0), (39, -1.0),
+    // ADC Cluster 5
+    (40,  1.0), (42, -1.0), (41,  1.0), (43, -1.0),
+    (44,  1.0), (46, -1.0), (45,  1.0), (47, -1.0),
+    // ADC Cluster 6
+    (48,  1.0), (50, -1.0), (49,  1.0), (51, -1.0),
+    (52,  1.0), (54, -1.0), (53,  1.0), (55, -1.0),
+    // ADC Cluster 7
+    (56,  1.0), (58, -1.0), (57,  1.0), (59, -1.0),
+    (60,  1.0), (62, -1.0), (61,  1.0), (63, -1.0),
+];
 
 // We are caching common instructions
 lazy_static! {
@@ -44,7 +80,8 @@ lazy_static! {
 /// explicitly for them to have any effect.
 pub struct Instrument {
     efm: bl::Device,
-    instr_buffer: Option<Vec<u8>>
+    instr_buffer: Option<Vec<u8>>,
+    memman: MemMan,
 }
 
 /// Find available device IDs.
@@ -65,6 +102,59 @@ pub fn find_ids() -> Result<Vec<i32>, String> {
         Err(format!("Invalid max id: {}", max_id))
     }
 }
+
+
+/// Convert a raw ADC value to current reading
+fn _adc_to_current(val: u32) -> f32 {
+
+    // first two bytes is the range
+    let range = ((val >> 24) & 0xFF) as u8;
+
+    // get the rest of the bytes
+    let mut bytes = val.to_be_bytes();
+
+    // replace the first 2 bytes (where the range was)
+    // with 0 to simplify things
+    bytes[0] = 0;
+
+    // and reconstruct the value into an i32 (which is
+    // what the ADC is outputting)
+    let uval = i32::from_be_bytes(bytes);
+
+    let val: f32;
+    let res: f32;
+    let temp: f32;
+
+    // If value is > 2e17 it means that ADC output has
+    // overflowed, so fix that. We know the ADC has only
+    // 18-bit precision so overflows cannot happen.
+    if uval > 2i32.pow(17) {
+        val = (uval - 2i32.pow(18)) as f32;
+    } else {
+        val = uval as f32;
+    }
+
+    // Calculation formula for different ranges
+    if range == 0x82 || range == 0x84 || range == 0x88 {
+        temp = 20.48 * (val / 2.0f32.powf(18.0));
+    } else {
+        temp = 10.24 * (val / 2.0f32.powf(18.0));
+    }
+
+    if range == 0x82 || range == 0x90 {
+        res = temp / 830.0;
+    } else if range == 0x84 || range == 0xa0 {
+        res = temp / 110.0e3;
+    } else if range == 0x88 || range == 0xc0 {
+        res = temp / 15.0e6;
+    } else {
+        res = f32::NAN;
+    }
+
+    res
+
+}
+
 
 impl Instrument {
 
@@ -88,7 +178,8 @@ impl Instrument {
         match bl::Device::open(id) {
             Ok(d) => Ok(Instrument {
                 efm: d,
-                instr_buffer: buffer
+                instr_buffer: buffer,
+                memman: MemMan::new()
             }),
             Err(err) => Err(format!("Could not open device: {}", err))
         }
@@ -111,6 +202,7 @@ impl Instrument {
         instr.process(&*RESET_DAC)?;
         instr.process(&*SET_3V3_LOGIC)?;
         instr.process(&*UPDATE_DAC)?;
+        instr.add_delay(10_000u128)?;
         instr.flush()?;
 
         Ok(instr)
@@ -170,6 +262,11 @@ impl Instrument {
 
     }
 
+    /// Add a delay to the FIFO command buffer
+    pub fn add_delay(&mut self, nanos: u128) -> Result<(), String> {
+        self.process(Delay::from_nanos(nanos).compile())
+    }
+
     /// Read raw data from block memory
     pub fn read_raw(&self, addr: u32) -> Result<Vec<u8>, String> {
         match self.efm.read_block(addr, INBUF as i32, BLFLAGS_R) {
@@ -178,10 +275,13 @@ impl Instrument {
         }
     }
 
-    /// Reset all DACs on the tool.
+    /// Reset all DACs on the tool. This will flush output
     pub fn reset_dacs(&mut self) -> Result<(), String> {
         self.process(&*RESET_DAC)?;
-        self.load_dacs()
+        self.process(&*SET_3V3_LOGIC)?;
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(10_000u128)?;
+        self.flush()
     }
 
     /// Set global 3.3 V logic level
@@ -193,6 +293,97 @@ impl Instrument {
     /// Update the DAC configuration
     pub fn load_dacs(&mut self) -> Result<(), String> {
         self.process(&*UPDATE_DAC)
+    }
+
+    /// Perform a current read between the specified channels. A voltage
+    /// of `-vread` will be applied to the `low` channel and current will
+    /// be read from the `high` channel.
+    pub fn read_one(&mut self, low: usize, high: usize, vread: f32) -> Result<f32, String> {
+
+        // Reset DAC configuration
+        self.reset_dacs()?;
+
+        // +--------------------------+
+        // | Output DAC configuration |
+        // +--------------------------+
+
+        // Create a channel mask containing only one channel
+        // (the biasing one)
+        let mut chanmask = DACMask::NONE;
+        chanmask.set_channel(low);
+
+        // Convert the voltage into a DAC value
+        let voltage = vidx!(-vread);
+        let mut dacvoltage = DACVoltage::new();
+        // Set the DAC-/DAC+ channels halves of the DAC
+        dacvoltage.set(low % dacvoltage.len(), voltage);
+
+        // Make the SetDAC instruction for the biasing channel
+        let mut setdac = SetDAC::with_regs(&chanmask, &dacvoltage);
+        self.process(setdac.compile())?;
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(10_000u128)?;
+
+        // +------------------------------+
+        // | Output Channel configuration |
+        // +------------------------------+
+
+        // set all channels to Arbitrary Voltage
+        let mut channelconf =
+            UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
+        self.process(channelconf.compile())?;
+
+        // +------------------+
+        // | IO configuration |
+        // +------------------+
+
+        // set all channel to output
+        let mut ioconf = UpdateLogic::new(true, true);
+        self.process(ioconf.compile())?;
+
+        // +-------------+
+        // | CurrentRead |
+        // +-------------+
+
+        // Get a new memory address to store data
+        let mut chunk = self.memman.alloc_chunk().unwrap();
+
+        // Create a mask of channels to read current from. This mask will
+        // select all channels of the cluster the high channel belongs to.
+        let mut adcmask = ADCMask::new();
+        // identify the cluster where the high channel belongs
+        let cluster = high / 8;
+        for channel in cluster*8..(cluster+1)*8 {
+            adcmask.set_enabled(channel, true);
+        }
+
+        let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
+        self.process(currentread.compile())?;
+        self.add_delay(1_500_000u128)?;
+
+        // Load the instructions on the FPGA
+        self.flush()?;
+
+        // And reset the DACs, removing all biasing
+        self.reset_dacs()?;
+
+        let data = self.read_raw(chunk.addr())?;
+
+        // Find out where in the cluster is the value that we
+        // want based on the CHAN2ADCIDX mapping.
+        let (chan, factor) = CHAN2ADCIDX[high];
+
+        // And assemble the number from the 4 neighbouring bytes
+        let val: u32 = u32::from_le_bytes([data[4*chan+0], data[4*chan+1],
+            data[4*chan+2], data[4*chan+3]]);
+
+        // Free up the FPGA chunk for reuse
+        match self.memman.free_chunk(&mut chunk) {
+            Ok(()) => {},
+            Err(_) => { return Err("Could not free up memory!!".to_string()); }
+        }
+
+        Ok(_adc_to_current(val)*factor)
     }
 
 }
