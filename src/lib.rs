@@ -1,4 +1,3 @@
-//use ndarray::{Array, Ix1};
 #[macro_use]
 extern crate lazy_static;
 

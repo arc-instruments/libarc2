@@ -1,6 +1,6 @@
 use std::{time, thread};
 use beastlink as bl;
-use ndarray::{Array, Ix1};
+use ndarray::{Array, Ix1, Ix2};
 
 use crate::instructions::*;
 use crate::registers::{DACMask, DACVoltage, ChannelState, ADCMask};
@@ -33,6 +33,18 @@ lazy_static! {
         instr.compile();
         instr
     };
+}
+
+
+/// Order of read-out operation when reading all crosspoints
+///
+/// This enum signifies how a _read all_ operation should be done with
+/// reference to the geometry of a full 32×32 array. `Columns` will
+/// bias rows (commonly referred to as *bitlines*) whereas
+/// `Rows` will bias columns (commonly referred to as *wordlines*).
+pub enum ReadOrder {
+    Columns,
+    Rows
 }
 
 
@@ -346,9 +358,10 @@ impl Instrument {
         }
     }
 
-    /// Read all the values which have `chan` as the low potential channel. If
-    /// `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
-    /// to a row read in a standard 32×32 array, otherwise it's a column read.
+    /// Read all the values which have `chan` as the low potential channel
+    ///
+    /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
+    /// to a row read at `vread` in a standard 32×32 array, otherwise it's a column read.
     pub fn read_slice(&mut self, chan: usize, vread: f32) -> Result<Vec<f32>, String> {
 
         // Reset DAC configuration
@@ -454,13 +467,56 @@ impl Instrument {
         Ok(res)
     }
 
-    /// Same as [`Instrument::read_slice`] but returning an [`ndarray::Array`] for numpy
-    /// compatibility
+    /// Same as [`Instrument::read_slice`] but returning an [`Array`][`ndarray::Array`]
+    /// for numpy compatibility
     pub fn read_slice_as_ndarray(&mut self, chan: usize, vread: f32) -> Result<Array<f32, Ix1>, String> {
 
         let data = self.read_slice(chan, vread)?;
 
         Ok(Array::from(data))
+    }
+
+    /// Read all the available crosspoints at the specified voltage
+    ///
+    /// This function will read all available crosspoints on the array. This can be done
+    /// either by biasing the columns ([`ReadOrder::Rows`]) or rows ([`ReadOrder::Columns`]).
+    /// The result is stored in linear vector (and not a 2D matrix) in blocks of 32 values
+    /// in channel order. When order is `Columns` the low potential channels are `[16..32)`
+    /// and `[48..64)` (wordlines). When order is `Rows` the low potential channels are
+    /// `[0..16)` and `[32..48)` (bitlines). Function [`Instrument::read_slice()`] is
+    /// applied for every one of the selected channels.
+    pub fn read_all(&mut self, vread: f32, order: ReadOrder) -> Result<Vec<f32>, String> {
+        let mut bias_channels: Vec<usize> = Vec::with_capacity(32);
+
+        let mut results = Vec::with_capacity(32*32);
+
+        match order {
+            ReadOrder::Rows => {
+                bias_channels.append(&mut (16usize..32).collect::<Vec<usize>>());
+                bias_channels.append(&mut (48usize..64).collect::<Vec<usize>>());
+
+            },
+            ReadOrder::Columns => {
+                bias_channels.append(&mut ( 0usize..16).collect::<Vec<usize>>());
+                bias_channels.append(&mut (32usize..48).collect::<Vec<usize>>());
+            }
+        };
+
+        for chan in &bias_channels {
+            results.append(&mut self.read_slice(*chan, vread)?);
+        }
+
+        Ok(results)
+
+    }
+
+    /// Same as [`Instrument::read_all()`] but represented as a 2D [`Array`][`ndarray::Array`].
+    pub fn read_all_as_ndarray(&mut self, vread: f32, order: ReadOrder) -> Result<Array<f32, Ix2>, String> {
+
+        let data = self.read_all(vread, order)?;
+
+        // we know the size is correct so we can unwrap safely here
+        Ok(Array::from_shape_vec((32, 32), data).unwrap())
     }
 
 }
