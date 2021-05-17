@@ -13,41 +13,6 @@ const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
 const INBUF: usize = 64*std::mem::size_of::<u32>();
 
-
-/// Channel assignment in the ADC readout is not linear. This map
-/// matches the channel number (the index of the array) with an
-/// index in the readout array (first element of the tuple) and
-/// additionally a polarity adjustment factor (second element of
-/// the tuple). In order to find out the current sunk by a channel
-/// the ADC output must be multiplied by the correction factor
-/// in this array.
-const CHAN2ADCIDX: [(usize, f32); 64] = [
-    // ADC Cluster 0
-    ( 0,  1.0), ( 2, -1.0), ( 1,  1.0), ( 3, -1.0),
-    ( 4,  1.0), ( 6, -1.0), ( 5,  1.0), ( 7, -1.0),
-    // ADC Cluster 1
-    ( 8,  1.0), (10, -1.0), ( 9,  1.0), (11, -1.0),
-    (12,  1.0), (14, -1.0), (13,  1.0), (15, -1.0),
-    // ADC Cluster 2
-    (16,  1.0), (18, -1.0), (17,  1.0), (19, -1.0),
-    (20,  1.0), (22, -1.0), (21,  1.0), (23, -1.0),
-    // ADC Cluster 3
-    (24,  1.0), (26, -1.0), (25,  1.0), (27, -1.0),
-    (28,  1.0), (30, -1.0), (29,  1.0), (31, -1.0),
-    // ADC Cluster 4
-    (32,  1.0), (34, -1.0), (33,  1.0), (35, -1.0),
-    (36,  1.0), (38, -1.0), (37,  1.0), (39, -1.0),
-    // ADC Cluster 5
-    (40,  1.0), (42, -1.0), (41,  1.0), (43, -1.0),
-    (44,  1.0), (46, -1.0), (45,  1.0), (47, -1.0),
-    // ADC Cluster 6
-    (48,  1.0), (50, -1.0), (49,  1.0), (51, -1.0),
-    (52,  1.0), (54, -1.0), (53,  1.0), (55, -1.0),
-    // ADC Cluster 7
-    (56,  1.0), (58, -1.0), (57,  1.0), (59, -1.0),
-    (60,  1.0), (62, -1.0), (61,  1.0), (63, -1.0),
-];
-
 // We are caching common instructions
 lazy_static! {
     static ref UPDATE_DAC: UpdateDAC = {
@@ -369,13 +334,9 @@ impl Instrument {
 
         let data = self.read_raw(chunk.addr())?;
 
-        // Find out where in the cluster is the value that we
-        // want based on the CHAN2ADCIDX mapping.
-        let (chan, factor) = CHAN2ADCIDX[high];
-
-        // And assemble the number from the 4 neighbouring bytes
-        let val: u32 = u32::from_le_bytes([data[4*chan+0], data[4*chan+1],
-            data[4*chan+2], data[4*chan+3]]);
+        // Assemble the number from the 4 neighbouring bytes
+        let val: u32 = u32::from_le_bytes([data[4*high+0], data[4*high+1],
+            data[4*high+2], data[4*high+3]]);
 
         // Free up the FPGA chunk for reuse
         match self.memman.free_chunk(&mut chunk) {
@@ -383,7 +344,13 @@ impl Instrument {
             Err(_) => { return Err("Could not free up memory!!".to_string()); }
         }
 
-        Ok(_adc_to_current(val)*factor)
+        if high % 2 == 0 {
+            Ok(_adc_to_current(val))
+        } else {
+            Ok(-1.0*_adc_to_current(val))
+        }
+    }
+
     }
 
 }
