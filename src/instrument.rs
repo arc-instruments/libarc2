@@ -327,10 +327,9 @@ impl Instrument {
         self.process(currentread.compile())?;
         self.add_delay(1_500_000u128)?;
 
-        // Load the instructions on the FPGA
-        self.flush()?;
-
         // And reset the DACs, removing all biasing
+        // This will also flush the write buffer loading
+        // the instructions on the FPGA
         self.reset_dacs()?;
 
         let data = self.read_raw(chunk.addr())?;
@@ -428,10 +427,9 @@ impl Instrument {
         self.process(currentread.compile())?;
         self.add_delay(1_500_000u128)?;
 
-        // Load the instructions on the FPGA
-        self.flush()?;
-
         // And reset the DACs, removing all biasing
+        // This will also flush the write buffer loading
+        // the instructions on the FPGA
         self.reset_dacs()?;
 
         // Make an array to hold all the values of row/column
