@@ -1,5 +1,6 @@
 use std::{time, thread};
 use beastlink as bl;
+use ndarray::{Array, Ix1};
 
 use crate::instructions::*;
 use crate::registers::{DACMask, DACVoltage, ChannelState, ADCMask};
@@ -351,9 +352,126 @@ impl Instrument {
         }
     }
 
+    /// Read all the values which have `chan` as the low potential channel. If
+    /// `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
+    /// to a row read in a standard 32×32 array, otherwise it's a column read.
+    pub fn read_slice(&mut self, chan: usize, vread: f32) -> Result<Vec<f32>, String> {
+
+        // Reset DAC configuration
+        self.reset_dacs()?;
+
+        // Create a channel mask containing only one channel
+        // (the biasing one)
+        let mut chanmask = DACMask::NONE;
+        chanmask.set_channel(chan);
+
+        // Convert the voltage into a DAC value
+        let voltage = vidx!(-vread);
+        let mut dacvoltage = DACVoltage::new();
+        // Set the DAC-/DAC+ channels halves of the DAC
+        dacvoltage.set(chan % dacvoltage.len(), voltage);
+
+        // Make the SetDAC instruction for the biasing channel
+        let mut setdac = SetDAC::with_regs(&chanmask, &dacvoltage);
+        self.process(setdac.compile())?;
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(10_000u128)?;
+
+        // +------------------------------+
+        // | Output Channel configuration |
+        // +------------------------------+
+
+        // set all channels to Arbitrary Voltage
+        let mut channelconf =
+            UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
+        self.process(channelconf.compile())?;
+
+        // +------------------+
+        // | IO configuration |
+        // +------------------+
+
+        // set all channel to output
+        let mut ioconf = UpdateLogic::new(true, true);
+        self.process(ioconf.compile())?;
+
+        // Get a new memory address to current data
+        let mut chunk = self.memman.alloc_chunk().unwrap();
+
+        let mut channels: Vec<usize> = Vec::with_capacity(32);
+
+        // Channels 0..16 and 32..48 correspond to rows
+        // so we want to read from all the columns in the
+        // row
+        if (chan < 16) || ((32 <= chan) && (chan < 48)) {
+            channels.append(&mut (16usize..32).collect::<Vec<usize>>());
+            channels.append(&mut (48usize..64).collect::<Vec<usize>>());
+        // Or the other way around. Channels 16..32 and
+        // 48..64 correspond to columns so we want to read
+        // from all the rows in the column.
+        } else {
+            channels.append(&mut ( 0usize..16).collect::<Vec<usize>>());
+            channels.append(&mut (32usize..48).collect::<Vec<usize>>());
+        }
+
+        // +-------------+
+        // | CurrentRead |
+        // +-------------+
+
+        // Prepare the ADC mask for the readout
+        let mut adcmask = ADCMask::new();
+
+        for chan in &channels {
+            adcmask.set_enabled(*chan, true);
+        }
+
+        let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
+        self.process(currentread.compile())?;
+        self.add_delay(1_500_000u128)?;
+
+        // Load the instructions on the FPGA
+        self.flush()?;
+
+        // And reset the DACs, removing all biasing
+        self.reset_dacs()?;
+
+        // Make an array to hold all the values of row/column
+        let mut res: Vec<f32> = Vec::with_capacity(32);
+
+        // Read the raw chunk of data
+        let data = self.read_raw(chunk.addr())?;
+
+        // Convert adc values to current
+        for chan in &channels {
+            let raw_value = u32::from_le_bytes([data[4*chan+0],
+                data[4*chan+1], data[4*chan+2], data[4*chan+3]]);
+            let cur = if chan % 2 == 0 {
+                _adc_to_current(raw_value)
+            } else {
+                -1.0*_adc_to_current(raw_value)
+            };
+            res.push(cur);
+        }
+
+        // Free up the FPGA chunk for reuse
+        match self.memman.free_chunk(&mut chunk) {
+            Ok(()) => {},
+            Err(_) => { return Err("Could not free up memory!!".to_string()); }
+        }
+
+        Ok(res)
+    }
+
+    /// Same as [`Instrument::read_slice`] but returning an [`ndarray::Array`] for numpy
+    /// compatibility
+    pub fn read_slice_as_ndarray(&mut self, chan: usize, vread: f32) -> Result<Array<f32, Ix1>, String> {
+
+        let data = self.read_slice(chan, vread)?;
+
+        Ok(Array::from(data))
     }
 
 }
+
 
 impl Drop for Instrument {
     fn drop(&mut self) {
