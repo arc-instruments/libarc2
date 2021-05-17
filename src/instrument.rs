@@ -314,14 +314,9 @@ impl Instrument {
         // Get a new memory address to store data
         let mut chunk = self.memman.alloc_chunk().unwrap();
 
-        // Create a mask of channels to read current from. This mask will
-        // select all channels of the cluster the high channel belongs to.
+        // Create a mask containing the read-out channel
         let mut adcmask = ADCMask::new();
-        // identify the cluster where the high channel belongs
-        let cluster = high / 8;
-        for channel in cluster*8..(cluster+1)*8 {
-            adcmask.set_enabled(channel, true);
-        }
+        adcmask.set_enabled(high, true);
 
         let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
         self.process(currentread.compile())?;
