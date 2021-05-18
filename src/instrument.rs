@@ -9,7 +9,7 @@ use crate::memory::{MemMan};
 const EFM03_VID: u16 = 0x10f8;
 const EFM03_PID: u16 = 0xc583;
 const BASEADDR: u32 = 0x80000000;
-const WRITEDELAY: time::Duration = time::Duration::from_millis(3);
+const WRITEDELAY: time::Duration = time::Duration::from_nanos(1_250_000);
 const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
 const INBUF: usize = 64*std::mem::size_of::<u32>();
@@ -332,7 +332,7 @@ impl Instrument {
 
         let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
         self.process(currentread.compile())?;
-        self.add_delay(1_500_000u128)?;
+        self.add_delay(1_000u128)?;
 
         // And reset the DACs, removing all biasing
         // This will also flush the write buffer loading
@@ -433,7 +433,7 @@ impl Instrument {
 
         let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
         self.process(currentread.compile())?;
-        self.add_delay(1_500_000u128)?;
+        self.add_delay(1_000u128)?;
 
         // And reset the DACs, removing all biasing
         // This will also flush the write buffer loading
