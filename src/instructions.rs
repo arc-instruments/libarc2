@@ -467,7 +467,7 @@ pub struct Delay {
 
 impl Delay {
 
-    const MIN_NS: u128 = 320;
+    pub(crate) const MIN_NS: u128 = 320;
 
     /// Create a new Delay instruction from the specified
     /// number of nanoseconds.

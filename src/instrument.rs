@@ -242,7 +242,23 @@ impl Instrument {
 
     /// Add a delay to the FIFO command buffer
     pub fn add_delay(&mut self, nanos: u128) -> Result<(), String> {
-        self.process(Delay::from_nanos(nanos).compile())
+
+        // If a small delay is requested process it immediately, it will
+        // be over before the computer can blink!
+        if nanos <= 500_000u128 {
+            self.process(Delay::from_nanos(nanos).compile())
+        } else {
+            // In any other case split the delay into two delays. A large
+            // delay that holds the bulk of the waiting and a zero delay
+            // that always corresponds to a minimum delay. That way if the
+            // delay instruction is the last in the instruction buffer then
+            // it will be terminated on a small delay. This is necessary
+            // because if a large delay is the last command in the buffer
+            // the FIFO will erroneously look empty *while* ArC2 is busy
+            // delaying.
+            self.process(Delay::from_nanos(nanos-Delay::MIN_NS).compile())?;
+            self.process(Delay::from_nanos(0u128).compile())
+        }
     }
 
     /// Read raw data from block memory
