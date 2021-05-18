@@ -9,6 +9,7 @@ use crate::memory::{MemMan};
 const EFM03_VID: u16 = 0x10f8;
 const EFM03_PID: u16 = 0xc583;
 const BASEADDR: u32 = 0x80000000;
+const FIFOBUSYADDR: u32 = 0x80020000;
 const WRITEDELAY: time::Duration = time::Duration::from_nanos(1_250_000);
 const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
@@ -532,6 +533,48 @@ impl Instrument {
 
         // we know the size is correct so we can unwrap safely here
         Ok(Array::from_shape_vec((32, 32), data).unwrap())
+    }
+
+    /// Check if the FPGA FIFO buffer is busy. The FPGA's FIFO buffer is regarded as busy
+    /// if it's not empty, which means all the instructions have not yet been consumed.
+    /// This is crucial for operations that include long delays. The output buffer should
+    /// _not_ be consumed before the FIFO has. Use [`Instrument::wait`] to wait until the
+    /// buffer has been emptied.
+    pub fn busy(&self) -> bool {
+
+        // Check FIFO empty flag; on error assume it's busy; you shouldn't be reading
+        // the output anyway.
+        let response = match self.efm.read_block(FIFOBUSYADDR, 1i32, BLFLAGS_R) {
+            Ok(buf) => { pktdbg!(buf); buf[0] },
+            Err(_) => { eprintln!("Error reading FIFO busy"); 0u8 }
+        };
+
+        // If value is 0x01 the FIFO is empty (and therefore NOT busy)
+        response != 1u8
+    }
+
+
+    /// Block until the instrument has executed its command buffer.
+    pub fn wait(&self) {
+
+        let mut counter: u64 = 0;
+        let mut exponent: u32 = 0;
+
+        while self.busy() {
+
+            // limit maximum polling to 100 ms
+            if exponent < 5 {
+                if counter == 9 {
+                    counter = 0;
+                    exponent += 1;
+                } else {
+                    counter += 1;
+                }
+            }
+
+            let wait = std::time::Duration::from_nanos(10u64.pow(exponent) * 1000u64);
+            std::thread::sleep(wait);
+        }
     }
 
 }
