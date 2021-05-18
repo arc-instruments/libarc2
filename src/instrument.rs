@@ -193,15 +193,29 @@ impl Instrument {
 
         instrdbg!(instr);
 
+        // convert the instruction into raw bytes
+        let mut bytes = instr.to_bytevec();
+
         // If an instruction buffer is used write the bytes to the buffer
         // instead of directly to the tool.
         if let Some(buff) = &mut self.instr_buffer {
-            buff.extend(instr.to_bytevec());
+
+            // To avoid reallocation of the buffer flush the instruction
+            // buffer if its length would go over capacity when the new
+            // instruction is added.
+            if buff.len() + bytes.len() > buff.capacity() {
+                self.flush()?;
+            }
+        }
+
+        if let Some(buff) = &mut self.instr_buffer {
+            // buffer is guaranteed to be under capacity here
+            buff.extend(bytes);
             return Ok(());
         }
 
-        // Otherwise write directly to ArC2
-        match self.efm.write_block(BASEADDR, &mut instr.to_bytevec(), BLFLAGS_W) {
+        // Otherwise write directly to ArC2 (immediate)
+        match self.efm.write_block(BASEADDR, &mut bytes, BLFLAGS_W) {
 
             Ok(()) => {
                 thread::sleep(WRITEDELAY);
