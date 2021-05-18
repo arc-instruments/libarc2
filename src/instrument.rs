@@ -43,6 +43,7 @@ lazy_static! {
 /// reference to the geometry of a full 32×32 array. `Columns` will
 /// bias rows (commonly referred to as *bitlines*) whereas
 /// `Rows` will bias columns (commonly referred to as *wordlines*).
+#[derive(Clone)]
 pub enum ReadOrder {
     Columns,
     Rows
