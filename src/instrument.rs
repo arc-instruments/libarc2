@@ -144,7 +144,10 @@ impl Instrument {
     /// has been called explicitly.
     pub fn open(id: i32, retained_mode: bool) -> Result<Instrument, String> {
 
-        find_ids()?;
+        if !find_ids()?.contains(&id) {
+            return Err(format!("No such device id: {}", id));
+        }
+
         let buffer: Option<Vec<u8>>;
 
         // If in retained mode preallocate space for 512 instructions.
