@@ -272,7 +272,6 @@ impl Instrument {
     /// Reset all DACs on the tool. This will flush output
     pub fn reset_dacs(&mut self) -> Result<(), String> {
         self.process(&*RESET_DAC)?;
-        self.process(&*SET_3V3_LOGIC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(10_000u128)?;
         self.flush()
