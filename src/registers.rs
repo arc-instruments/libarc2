@@ -903,13 +903,18 @@ impl ChannelConf {
         let bools = val.as_bools();
 
         for i in 0..bools.len() {
-            bits.set(consts::CHANCONFSIZE * idx + i, bools[consts::CHANCONFSIZE-1-i]);
+            let bitidx = consts::NCHANS*consts::CHANCONFSIZE -
+                (consts::CHANCONFSIZE*idx+i) - 1;
+            bits.set(bitidx, bools[i]);
         }
     }
 
     /// Get the [`state`][`ChannelState`] of a channel
     pub fn get(&self, idx: usize) -> ChannelState {
-        let v = &self.bits[idx*consts::CHANCONFSIZE..(idx+1)*consts::CHANCONFSIZE];
+        let from = consts::NCHANS*consts::CHANCONFSIZE - (consts::CHANCONFSIZE*idx+1) - 1;
+        let to = consts::NCHANS*consts::CHANCONFSIZE - (consts::CHANCONFSIZE*(idx));
+
+        let v = &self.bits[from..to];
 
         ChannelState::try_from(v).unwrap()
     }
