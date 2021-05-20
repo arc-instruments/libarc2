@@ -54,14 +54,14 @@ lazy_static! {
 }
 
 
-/// Order of read-out operation when reading all crosspoints
+/// Order of read/pulse operation when reading all crosspoints
 ///
-/// This enum signifies how a _read all_ operation should be done with
-/// reference to the geometry of a full 32×32 array. `Columns` will
-/// bias rows (commonly referred to as *bitlines*) whereas
+/// This enum signifies how a _{read,pulse} all_ operation should be
+/// done with respect to the geometry of a full 32×32 array. `Columns`
+/// will bias rows (commonly referred to as *bitlines*) whereas
 /// `Rows` will bias columns (commonly referred to as *wordlines*).
 #[derive(Clone)]
-pub enum ReadOrder {
+pub enum BiasOrder {
     Columns,
     Rows
 }
@@ -555,24 +555,24 @@ impl Instrument {
     /// Read all the available crosspoints at the specified voltage
     ///
     /// This function will read all available crosspoints on the array. This can be done
-    /// either by biasing the columns ([`ReadOrder::Rows`]) or rows ([`ReadOrder::Columns`]).
+    /// either by biasing the columns ([`BiasOrder::Rows`]) or rows ([`BiasOrder::Columns`]).
     /// The result is stored in linear vector (and not a 2D matrix) in blocks of 32 values
     /// in channel order. When order is `Columns` the low potential channels are `[16..32)`
     /// and `[48..64)` (wordlines). When order is `Rows` the low potential channels are
     /// `[0..16)` and `[32..48)` (bitlines). Function [`Instrument::read_slice()`] is
     /// applied for every one of the selected channels.
-    pub fn read_all(&mut self, vread: f32, order: ReadOrder) -> Result<Vec<f32>, String> {
+    pub fn read_all(&mut self, vread: f32, order: BiasOrder) -> Result<Vec<f32>, String> {
         let mut bias_channels: Vec<usize> = Vec::with_capacity(32);
 
         let mut results = Vec::with_capacity(32*32);
 
         match order {
-            ReadOrder::Rows => {
+            BiasOrder::Rows => {
                 bias_channels.append(&mut (16usize..32).collect::<Vec<usize>>());
                 bias_channels.append(&mut (48usize..64).collect::<Vec<usize>>());
 
             },
-            ReadOrder::Columns => {
+            BiasOrder::Columns => {
                 bias_channels.append(&mut ( 0usize..16).collect::<Vec<usize>>());
                 bias_channels.append(&mut (32usize..48).collect::<Vec<usize>>());
             }
@@ -587,7 +587,7 @@ impl Instrument {
     }
 
     /// Same as [`Instrument::read_all()`] but represented as a 2D [`Array`][`ndarray::Array`].
-    pub fn read_all_as_ndarray(&mut self, vread: f32, order: ReadOrder) -> Result<Array<f32, Ix2>, String> {
+    pub fn read_all_as_ndarray(&mut self, vread: f32, order: BiasOrder) -> Result<Array<f32, Ix2>, String> {
 
         let data = self.read_all(vread, order)?;
 
