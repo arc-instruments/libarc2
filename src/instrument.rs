@@ -36,8 +36,16 @@ lazy_static! {
         instr
     };
 
-    static ref FLOAT_ALL: UpdateChannel = {
+    static ref CHAN_FLOAT_ALL: UpdateChannel = {
         let chanconf = ChannelConf::new_with_state(ChannelState::Open);
+        let mut instr = UpdateChannel::from_regs_default_source(&chanconf);
+
+        instr.compile();
+        instr
+    };
+
+    static ref CHAN_ARB_ALL: UpdateChannel = {
+        let chanconf = ChannelConf::new_with_state(ChannelState::VoltArb);
         let mut instr = UpdateChannel::from_regs_default_source(&chanconf);
 
         instr.compile();
@@ -318,7 +326,15 @@ impl Instrument {
 
     /// Disconnect all channels
     pub fn float_all(&mut self) -> Result<(), String> {
-        self.process(&*FLOAT_ALL)?;
+        self.process(&*CHAN_FLOAT_ALL)?;
+        self.flush()
+    }
+
+    pub fn ground_all(&mut self) -> Result<(), String> {
+        self.process(&*CHAN_ARB_ALL)?;
+        self.process(&*RESET_DAC)?;
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(10_000u128)?;
         self.flush()
     }
 
