@@ -4,6 +4,7 @@ use ndarray::{Array, Ix1, Ix2};
 
 use crate::instructions::*;
 use crate::registers::{DACMask, DACVoltage, ChannelState, ADCMask};
+use crate::registers::{ChannelConf};
 use crate::memory::{MemMan};
 
 const EFM03_VID: u16 = 0x10f8;
@@ -31,6 +32,14 @@ lazy_static! {
 
     static ref SET_3V3_LOGIC: SetDAC = {
         let mut instr = SetDAC::new_3v3_logic();
+        instr.compile();
+        instr
+    };
+
+    static ref FLOAT_ALL: UpdateChannel = {
+        let chanconf = ChannelConf::new_with_state(ChannelState::Open);
+        let mut instr = UpdateChannel::from_regs_default_source(&chanconf);
+
         instr.compile();
         instr
     };
@@ -293,6 +302,12 @@ impl Instrument {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(10_000u128)?;
+        self.flush()
+    }
+
+    /// Disconnect all channels
+    pub fn float_all(&mut self) -> Result<(), String> {
+        self.process(&*FLOAT_ALL)?;
         self.flush()
     }
 
