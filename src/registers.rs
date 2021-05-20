@@ -432,7 +432,16 @@ impl ToU32s for HSDelay {
 /// The default constructor covers the most basic operation which is is a
 /// typical low/high/low pulse. The additional function
 /// [`new_with_params()`][`Self::new_with_params`] allows to provide more
-/// arguments that handle the case where the pulse previously configured
+/// arguments that handle two different usecases
+///
+/// (A) The pulse on this channel is lower than the baseline voltage used on
+/// the other channels. This is quite common when doing differential biasing.
+/// For instance if a 2.0 V pulse is applied between high and low this can be
+/// split into a 1.0 V pulse on the high channel and -1.0 V pulse on the low
+/// channel. In that case the `polarity` bit of the cluster the low channel
+/// belongs to should be asserted.
+///
+/// (B) The pulse previously configured
 /// with a [`HSConfig`][`crate::instructions::HSConfig`] instruction has a zero-width
 /// pulse width. This is a special case that essentially means "pulse +
 /// hold". In this case the additional arguments of
@@ -453,8 +462,8 @@ impl ToU32s for HSDelay {
 ///
 /// assert_eq!(attrs.as_u32s(), &[0x00030000]);
 ///
-/// // Similar but with extra parameters for zero-width pulses
-/// let attrs = PulseAttrs::new_with_params(ClusterMask::CL0, true, true);
+/// // Similar but with extra parameters
+/// let attrs = PulseAttrs::new_with_params(ClusterMask::CL0, ClusterMask::CL0, ClusterMask::CL0);
 ///
 /// assert_eq!(attrs.as_u32s(), &[0x00010101]);
 /// ```
@@ -470,11 +479,11 @@ pub struct PulseAttrs {
     // width. In this case if polarity is 1 the instrument will go
     // from whatever its state to DAC+. If polarity is 0 will
     // revert to DAC- instead.
-    polarity: u8,
+    polarity: ClusterMask,
     // If cancel is 1 and pulse width is 0 the channel will be
     // connected to a 10 MΩ resistor instead of returning to
     // DAC+ or DAC- depending on the value of polarity.
-    cancel: u8
+    cancel: ClusterMask
 }
 
 impl PulseAttrs {
@@ -482,16 +491,15 @@ impl PulseAttrs {
     /// Create a new pulse attribute register enabling the specified
     /// DAC clusters for a low/high/low operation.
     pub fn new(clusters: ClusterMask) -> Self {
-        Self::new_with_params(clusters, false, false)
+        Self::new_with_params(clusters, ClusterMask::NONE, ClusterMask::NONE)
     }
 
-    /// Provide additional arguments to handle zero-width pulses (see
-    /// documentation for [`PulseAttrs`]).
-    pub fn new_with_params(clusters: ClusterMask, polarity: bool, cancel: bool) -> Self {
+    /// Provide additional arguments (see documentation for [`PulseAttrs`]).
+    pub fn new_with_params(clusters: ClusterMask, polarity: ClusterMask, cancel: ClusterMask) -> Self {
         PulseAttrs {
             cluster: clusters,
-            polarity: polarity as u8,
-            cancel: cancel as u8
+            polarity: polarity,
+            cancel: cancel
         }
     }
 }
@@ -500,8 +508,8 @@ impl ToU32s for PulseAttrs {
     fn as_u32s(&self) -> Vec<u32> {
         let value = u32::from_be_bytes([0x00,
                                         self.cluster.bits(),
-                                        self.polarity,
-                                        self.cancel]);
+                                        self.polarity.bits(),
+                                        self.cancel.bits()]);
         [value].to_vec()
     }
 }
