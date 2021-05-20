@@ -820,6 +820,13 @@ impl HSPulse {
         Self::new_from_attrs(&PulseAttrs::new(clusters))
     }
 
+    /// Same as [`HSPulse::new`] but providing a slice of clusters
+    /// to enable instead of a [`ClusterMask`].
+    pub fn new_from_cluster_idx(clusters: &[u8]) -> Self {
+        let clusters = ClusterMask::new_from_cluster_idx(clusters);
+        Self::new(clusters)
+    }
+
     pub fn new_from_attrs(attrs: &PulseAttrs) -> Self {
         let mut instr = Self::create();
         instr.push_register(&OpCode::HSPulseStart);

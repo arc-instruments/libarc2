@@ -282,20 +282,49 @@ bitflags! {
     /// activating a high speed pulse on one or more output DAC
     /// clusters.
     pub struct ClusterMask: u8 {
-        const CL0 = 0b00000001;
-        const CL1 = 0b00000010;
-        const CL2 = 0b00000100;
-        const CL3 = 0b00001000;
-        const CL4 = 0b00010000;
-        const CL5 = 0b00100000;
-        const CL6 = 0b01000000;
-        const CL7 = 0b10000000;
+        const NONE = 0b00000000;
+        const CL0  = 0b00000001;
+        const CL1  = 0b00000010;
+        const CL2  = 0b00000100;
+        const CL3  = 0b00001000;
+        const CL4  = 0b00010000;
+        const CL5  = 0b00100000;
+        const CL6  = 0b01000000;
+        const CL7  = 0b10000000;
 
         const ALL = Self::CL0.bits | Self::CL1.bits | Self::CL2.bits |
                     Self::CL3.bits | Self::CL4.bits | Self::CL5.bits |
                     Self::CL6.bits | Self::CL7.bits;
     }
 }
+
+
+impl ClusterMask {
+
+    const HSCLUSTERMAP: [ClusterMask; 8] = [
+        ClusterMask::CL0,
+        ClusterMask::CL1,
+        ClusterMask::CL2,
+        ClusterMask::CL3,
+        ClusterMask::CL4,
+        ClusterMask::CL5,
+        ClusterMask::CL6,
+        ClusterMask::CL7,
+    ];
+
+    /// Create a new [`ClusterMask`] by providing a slice of
+    /// clusters instead of a bitmask.
+    pub fn new_from_cluster_idx(clusters: &[u8]) -> Self {
+        let mut mask = ClusterMask::NONE;
+        for cl in clusters {
+            mask |= Self::HSCLUSTERMAP[*cl as usize];
+        }
+
+        mask
+    }
+
+}
+
 
 /// Delays for high speed pulse drivers
 ///
