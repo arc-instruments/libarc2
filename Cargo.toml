@@ -28,3 +28,5 @@ assert_matches = "1.5"
 hardware_tests = []
 # enable this to print out raw packets to stderr
 debug_packets = []
+# enabling this prevents libarc2 from writing to the hardware
+dummy_writes = []

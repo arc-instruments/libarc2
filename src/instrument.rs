@@ -227,6 +227,7 @@ impl Instrument {
         }
 
         // Otherwise write directly to ArC2 (immediate)
+        #[cfg(not(feature="dummy_writes"))]
         match self.efm.write_block(BASEADDR, &mut bytes, BLFLAGS_W) {
 
             Ok(()) => {
@@ -234,6 +235,9 @@ impl Instrument {
             },
             Err(err) => return Err(format!("Could not write buffer: {}", err))
         }
+
+        #[cfg(feature="dummy_writes")]
+        eprintln!("DW: {:?}", bytes);
 
         Ok(())
     }
@@ -246,13 +250,20 @@ impl Instrument {
         // nothing as all writes are immediates
         match self.instr_buffer {
             Some(ref mut buf) => {
-                match self.efm.write_block(BASEADDR, buf, BLFLAGS_W) {
-                    Ok(()) => {
-                        thread::sleep(WRITEDELAY);
-                        buf.clear();
-                        Ok(())
-                    },
-                    Err(err) => Err(format!("Could not write buffer: {}", err))
+                #[cfg(not(feature="dummy_writes"))] {
+                    match self.efm.write_block(BASEADDR, buf, BLFLAGS_W) {
+                        Ok(()) => {
+                            eprintln!("real write");
+                            thread::sleep(WRITEDELAY);
+                            buf.clear();
+                            Ok(())
+                        },
+                        Err(err) => Err(format!("Could not write buffer: {}", err))
+                    }
+                }
+                #[cfg(feature="dummy_writes")] {
+                    eprintln!("DW: {:?}", buf);
+                    Ok(())
                 }
             },
             None => Ok(())
