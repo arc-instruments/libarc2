@@ -4,7 +4,7 @@ use ndarray::{Array, Ix1, Ix2};
 
 use crate::instructions::*;
 use crate::registers::{DACMask, DACVoltage, ChannelState, ADCMask};
-use crate::registers::{ChannelConf};
+use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
 use crate::memory::{MemMan};
 
 const EFM03_VID: u16 = 0x10f8;
@@ -635,6 +635,150 @@ impl Instrument {
             let wait = std::time::Duration::from_nanos(10u64.pow(exponent) * 1000u64);
             std::thread::sleep(wait);
         }
+    }
+
+    /// Apply a pulse between the specified channels. A voltage of `-voltage/2` will be
+    /// applied to the `low` channel `voltage/2` to the `high` channel.
+    pub fn pulse_one(&mut self, low: usize, high: usize, voltage: f32, nanos: u128) -> Result<(), String> {
+
+        // use the high speed driver for all pulses faster than 500 ms
+        if nanos < 500_000_000u128 {
+            self.pulse_one_fast(low, high, voltage, nanos)?;
+        } else {
+            self.pulse_one_slow(low, high, voltage, nanos)?;
+        }
+
+        Ok(())
+    }
+
+    /// Setup the biasing channels for single pulsing. This function will setup the
+    /// output DACs for pulsing of a single crosspoint. It will set the high channel
+    /// to `voltage/2` and the low channel to `-voltage/2`. If the `differential`
+    /// argument is true then the DACs will be setup for high-speed differential
+    /// pulsing as required by the High Speed drivers. No delays are introduced
+    /// here as this will be handled either by a standard Delay instruction or
+    /// a High Speed timer.
+    fn _setup_dacs_for_single_pulsing(&mut self, low: usize, high: usize,
+        voltage: f32, differential: bool) -> Result<(), String> {
+        //
+        // Set high channel to voltage/2
+        let mut highmask = DACMask::NONE;
+        highmask.set_channel(high);
+
+        let mut high_v = DACVoltage::new();
+        if differential {
+            // in differential biasing we need to ensure that DAC+ is higher than DAC-
+            if voltage > 0.0 {
+                high_v.set_high(high % high_v.len(), vidx!(voltage/2.0));
+                high_v.set_low(high % high_v.len(), vidx!(0.0));
+            } else {
+                high_v.set_low(high % high_v.len(), vidx!(voltage/2.0));
+                high_v.set_high(high % high_v.len(), vidx!(0.0));
+            }
+        } else {
+            // otherwise both DAC+ and DAC- are the same value
+            high_v.set(high % high_v.len(), vidx!(voltage/2.0));
+        }
+
+        // Set low channel to -voltage/2
+        let mut lowmask = DACMask::NONE;
+        lowmask.set_channel(low);
+
+        let mut low_v = DACVoltage::new();
+        if differential {
+            if voltage < 0.0 {
+                low_v.set_high(low % low_v.len(), vidx!(-voltage/2.0));
+                low_v.set_low(low % low_v.len(), vidx!(0.0));
+            } else {
+                low_v.set_low(low % low_v.len(), vidx!(-voltage/2.0));
+                low_v.set_high(low % low_v.len(), vidx!(0.0));
+            }
+        } else {
+            low_v.set(low % low_v.len(), vidx!(-voltage/2.0));
+        }
+
+        let mut setdac_high = SetDAC::with_regs(&highmask, &high_v);
+        let mut setdac_low = SetDAC::with_regs(&lowmask, &low_v);
+
+        self.process(setdac_high.compile())?;
+        self.process(setdac_low.compile())?;
+        self.process(&*UPDATE_DAC)
+
+    }
+
+    /// Pulse a crosspoint using conventional biasing and delaying
+    fn pulse_one_slow(&mut self, low: usize, high: usize, voltage: f32, nanos: u128) -> Result<(), String> {
+
+        eprintln!(">>> pulse slow");
+        self.ground_all()?;
+        // set high and low channels as HS drivers
+        let mut bias_conf = ChannelConf::new();
+        bias_conf.set(high, ChannelState::VoltArb);
+        bias_conf.set(low, ChannelState::VoltArb);
+
+        let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
+        self.process(conf.compile())?;
+
+        // setup a non-differential pulsing scheme
+        self._setup_dacs_for_single_pulsing(low, high, voltage, false)?;
+        self.add_delay(nanos+10_000u128)?;
+
+        self.flush()?;
+
+        // ground everything back to 0V
+        self.ground_all()
+    }
+
+    /// Pulse a crosspoint using the high speed drivers
+    fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128) -> Result<(), String> {
+
+        self.ground_all()?;
+
+        // set high and low channels as HS drivers
+        let mut bias_conf = ChannelConf::new();
+        bias_conf.set(high, ChannelState::HiSpeed);
+        bias_conf.set(low, ChannelState::HiSpeed);
+
+        let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
+        self.process(conf.compile())?;
+
+        // setup a differential pulsing scheme
+        self._setup_dacs_for_single_pulsing(low, high, voltage, true)?;
+        self.add_delay(10_000u128)?;
+
+        let mut timings: [u32; 8] = [0u32; 8];
+        // Obviously these will clip if nanos > u32::MAX
+        // but we shouldn't get there because the high speed
+        // path is triggered for < 500e6 nanoseconds which
+        // will always fit in a u32
+        let cl_low = low/8;
+        let cl_high = high/8;
+        timings[cl_low] = nanos as u32;
+        timings[cl_high] = nanos as u32;
+
+        let mut hsconf = HSConfig::new(timings);
+        self.process(hsconf.compile())?;
+
+        let hs_clusters = ClusterMask::new_from_cluster_idx(&[cl_low as u8, cl_high as u8]);
+        let inv_clusters = if voltage > 0.0 {
+            ClusterMask::new_from_cluster_idx(&[cl_low as u8])
+        } else if voltage < 0.0 {
+            ClusterMask::new_from_cluster_idx(&[cl_high as u8])
+        } else {
+            ClusterMask::NONE
+        };
+        let cncl_clusters = ClusterMask::NONE;
+
+        let pulse_attrs = PulseAttrs::new_with_params(hs_clusters,
+            inv_clusters, cncl_clusters);
+
+        let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
+        self.process(pulse.compile())?;
+
+        self.flush()?;
+
+        // ground everything back to 0V
+        self.ground_all()
     }
 
 }
