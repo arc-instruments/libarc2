@@ -157,7 +157,7 @@ impl Instrument {
 
     /// Create a new Instrument with a known ID.  Use [`find_ids`]
     /// to discover devices. Set `retained_mode` to `true` to defer
-    /// writing instructions until an [`Instrument::flush()`]
+    /// writing instructions until an [`Instrument::execute()`]
     /// has been called explicitly.
     pub fn open(id: i32, retained_mode: bool) -> Result<Instrument, String> {
 
@@ -556,7 +556,7 @@ impl Instrument {
     /// Read all the available crosspoints at the specified voltage
     ///
     /// This function will read all available crosspoints on the array. This can be done
-    /// either by biasing the columns ([`BiasOrder::Rows`]) or rows ([`BiasOrder::Columns`]).
+    /// either by high biasing the rows ([`BiasOrder::Rows`]) or columns ([`BiasOrder::Columns`]).
     /// The result is stored in linear vector (and not a 2D matrix) in blocks of 32 values
     /// in channel order. When order is `Columns` the low potential channels are `[16..32)`
     /// and `[48..64)` (wordlines). When order is `Rows` the low potential channels are
@@ -708,7 +708,8 @@ impl Instrument {
 
     }
 
-    /// Pulse a crosspoint using conventional biasing and delaying
+    /// Pulse a crosspoint using conventional biasing and delaying. This function
+    /// will *NOT* automatically flush output.
     fn pulse_one_slow(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
         -> Result<&mut Self, String> {
 
@@ -729,7 +730,8 @@ impl Instrument {
         self.ground_all()
     }
 
-    /// Pulse a crosspoint using the high speed drivers
+    /// Pulse a crosspoint using the high speed drivers. This function will *NOT*
+    /// automatically flush output.
     fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
         -> Result<&mut Self, String> {
 
