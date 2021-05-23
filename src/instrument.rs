@@ -262,7 +262,6 @@ impl Instrument {
                 #[cfg(not(feature="dummy_writes"))] {
                     match self.efm.write_block(BASEADDR, buf, BLFLAGS_W) {
                         Ok(()) => {
-                            eprintln!("real write");
                             thread::sleep(WRITEDELAY);
                             buf.clear();
                             Ok(self)
@@ -713,7 +712,6 @@ impl Instrument {
     fn pulse_one_slow(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
         -> Result<&mut Self, String> {
 
-        eprintln!(">>> pulse slow");
         self.ground_all()?;
         // set high and low channels as HS drivers
         let mut bias_conf = ChannelConf::new();
