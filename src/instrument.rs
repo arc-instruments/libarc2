@@ -252,7 +252,7 @@ impl Instrument {
 
     /// Write all retained instructions to ArC2. Has no effect if
     /// `retained_mode` is `false`.
-    pub fn flush(&mut self) -> Result<(), String> {
+    pub fn flush(&mut self) -> Result<&mut Self, String> {
 
         // If an instruction buffer is used empty it, otherwise do
         // nothing as all writes are immediates
@@ -264,7 +264,7 @@ impl Instrument {
                             eprintln!("real write");
                             thread::sleep(WRITEDELAY);
                             buf.clear();
-                            Ok(())
+                            Ok(self)
                         },
                         Err(err) => Err(format!("Could not write buffer: {}", err))
                     }
@@ -274,7 +274,7 @@ impl Instrument {
                     Ok(())
                 }
             },
-            None => Ok(())
+            None => Ok(self)
         }
 
 
@@ -288,12 +288,12 @@ impl Instrument {
     }
 
     /// Add a delay to the FIFO command buffer
-    pub fn add_delay(&mut self, nanos: u128) -> Result<(), String> {
+    pub fn add_delay(&mut self, nanos: u128) -> Result<&mut Self, String> {
 
         // If a small delay is requested process it immediately, it will
         // be over before the computer can blink!
         if nanos <= 500_000u128 {
-            self.process(Delay::from_nanos(nanos).compile())
+            self.process(Delay::from_nanos(nanos).compile())?;
         } else {
             // In any other case split the delay into two delays. A large
             // delay that holds the bulk of the waiting and a zero delay
@@ -304,8 +304,9 @@ impl Instrument {
             // the FIFO will erroneously look empty *while* ArC2 is busy
             // delaying.
             self.process(Delay::from_nanos(nanos-Delay::MIN_NS).compile())?;
-            self.process(Delay::from_nanos(0u128).compile())
+            self.process(Delay::from_nanos(0u128).compile())?;
         }
+        Ok(self)
     }
 
     /// Read raw data from block memory
@@ -317,7 +318,7 @@ impl Instrument {
     }
 
     /// Reset all DACs on the tool. This will flush output
-    pub fn reset_dacs(&mut self) -> Result<(), String> {
+    pub fn reset_dacs(&mut self) -> Result<&mut Self, String> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(10_000u128)?;
@@ -325,12 +326,12 @@ impl Instrument {
     }
 
     /// Disconnect all channels
-    pub fn float_all(&mut self) -> Result<(), String> {
+    pub fn float_all(&mut self) -> Result<&mut Self, String> {
         self.process(&*CHAN_FLOAT_ALL)?;
         self.flush()
     }
 
-    pub fn ground_all(&mut self) -> Result<(), String> {
+    pub fn ground_all(&mut self) -> Result<&mut Self, String> {
         self.process(&*CHAN_ARB_ALL)?;
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
@@ -339,14 +340,15 @@ impl Instrument {
     }
 
     /// Set global 3.3 V logic level
-    pub fn set_3v3_logic(&mut self) -> Result<(), String> {
+    pub fn set_3v3_logic(&mut self) -> Result<&mut Self, String> {
         self.process(&*SET_3V3_LOGIC)?;
         self.load_dacs()
     }
 
     /// Update the DAC configuration
-    pub fn load_dacs(&mut self) -> Result<(), String> {
-        self.process(&*UPDATE_DAC)
+    pub fn load_dacs(&mut self) -> Result<&mut Self, String> {
+        self.process(&*UPDATE_DAC)?;
+        Ok(self)
     }
 
     /// Perform a current read between the specified channels. A voltage
@@ -639,7 +641,8 @@ impl Instrument {
 
     /// Apply a pulse between the specified channels. A voltage of `-voltage/2` will be
     /// applied to the `low` channel `voltage/2` to the `high` channel.
-    pub fn pulse_one(&mut self, low: usize, high: usize, voltage: f32, nanos: u128) -> Result<(), String> {
+    pub fn pulse_one(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
+        -> Result<&mut Self, String> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
@@ -648,7 +651,7 @@ impl Instrument {
             self.pulse_one_slow(low, high, voltage, nanos)?;
         }
 
-        Ok(())
+        Ok(self)
     }
 
     /// Setup the biasing channels for single pulsing. This function will setup the
@@ -707,7 +710,8 @@ impl Instrument {
     }
 
     /// Pulse a crosspoint using conventional biasing and delaying
-    fn pulse_one_slow(&mut self, low: usize, high: usize, voltage: f32, nanos: u128) -> Result<(), String> {
+    fn pulse_one_slow(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
+        -> Result<&mut Self, String> {
 
         eprintln!(">>> pulse slow");
         self.ground_all()?;
@@ -730,7 +734,8 @@ impl Instrument {
     }
 
     /// Pulse a crosspoint using the high speed drivers
-    fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128) -> Result<(), String> {
+    fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
+        -> Result<&mut Self, String> {
 
         self.ground_all()?;
 
