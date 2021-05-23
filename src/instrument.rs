@@ -203,7 +203,7 @@ impl Instrument {
         instr.process(&*SET_3V3_LOGIC)?;
         instr.process(&*UPDATE_DAC)?;
         instr.add_delay(10_000u128)?;
-        instr.flush()?;
+        instr.execute()?;
 
         Ok(instr)
     }
@@ -224,7 +224,7 @@ impl Instrument {
             // buffer if its length would go over capacity when the new
             // instruction is added.
             if buff.len() + bytes.len() > buff.capacity() {
-                self.flush()?;
+                self.execute()?;
             }
         }
 
@@ -251,8 +251,9 @@ impl Instrument {
     }
 
     /// Write all retained instructions to ArC2. Has no effect if
-    /// `retained_mode` is `false`.
-    pub fn flush(&mut self) -> Result<&mut Self, String> {
+    /// `retained_mode` is `false` since all instructions are
+    /// executed as they are issued.
+    pub fn execute(&mut self) -> Result<&mut Self, String> {
 
         // If an instruction buffer is used empty it, otherwise do
         // nothing as all writes are immediates
@@ -317,26 +318,25 @@ impl Instrument {
         }
     }
 
-    /// Reset all DACs on the tool. This will flush output
+    /// Reset all DACs on the tool. This will execute existing buffers.
     pub fn reset_dacs(&mut self) -> Result<&mut Self, String> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(10_000u128)?;
-        self.flush()
+        self.execute()
     }
 
     /// Disconnect all channels
     pub fn float_all(&mut self) -> Result<&mut Self, String> {
         self.process(&*CHAN_FLOAT_ALL)?;
-        self.flush()
+        Ok(self)
     }
 
     pub fn ground_all(&mut self) -> Result<&mut Self, String> {
         self.process(&*CHAN_ARB_ALL)?;
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
-        self.add_delay(10_000u128)?;
-        self.flush()
+        self.add_delay(10_000u128)
     }
 
     /// Set global 3.3 V logic level
@@ -727,8 +727,6 @@ impl Instrument {
         self._setup_dacs_for_single_pulsing(low, high, voltage, false)?;
         self.add_delay(nanos+10_000u128)?;
 
-        self.flush()?;
-
         // ground everything back to 0V
         self.ground_all()
     }
@@ -779,8 +777,6 @@ impl Instrument {
 
         let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
         self.process(pulse.compile())?;
-
-        self.flush()?;
 
         // ground everything back to 0V
         self.ground_all()
