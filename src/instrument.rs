@@ -713,7 +713,6 @@ impl Instrument {
     fn pulse_one_slow(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
         -> Result<&mut Self, String> {
 
-        self.ground_all()?;
         // set high and low channels as HS drivers
         let mut bias_conf = ChannelConf::new();
         bias_conf.set(high, ChannelState::VoltArb);
@@ -725,17 +724,14 @@ impl Instrument {
         // setup a non-differential pulsing scheme
         self._setup_dacs_for_single_pulsing(low, high, voltage, false)?;
         self.add_delay(nanos+10_000u128)?;
-
-        // ground everything back to 0V
         self.ground_all()
+
     }
 
     /// Pulse a crosspoint using the high speed drivers. This function will *NOT*
     /// automatically flush output.
     fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
         -> Result<&mut Self, String> {
-
-        self.ground_all()?;
 
         // set high and low channels as HS drivers
         let mut bias_conf = ChannelConf::new();
@@ -777,9 +773,8 @@ impl Instrument {
 
         let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
         self.process(pulse.compile())?;
-
-        // ground everything back to 0V
         self.ground_all()
+
     }
 
 }
