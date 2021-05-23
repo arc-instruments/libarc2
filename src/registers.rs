@@ -1215,14 +1215,35 @@ impl DACVoltage {
 
     /// Create a new register with four channels
     pub fn new() -> DACVoltage {
-        DACVoltage::new_with_size(4)
+        Self::new_with_size_and_voltage(4, DACVZERO)
     }
 
-    fn new_with_size(size: usize) -> DACVoltage {
+    /// Create a new register with all four channels set at
+    /// the specified levels
+    ///
+    /// ```
+    /// use libarc2::registers::{DACVoltage, ToU32s};
+    ///
+    /// let reg = DACVoltage::new_at_levels(0xaaaa, 0xbbbb);
+    ///
+    /// for i in 0..4 {
+    ///     assert_eq!(reg.get(i), (0xaaaa, 0xbbbb));
+    /// }
+    ///
+    /// assert_eq!(reg.as_u32s(), &[0xbbbbaaaa, 0xbbbbaaaa,
+    ///     0xbbbbaaaa, 0xbbbbaaaa]);
+    /// ```
+    pub fn new_at_levels(low: u16, high: u16) -> DACVoltage {
+        let voltage: u32 =
+            ((high as u32) << 16) | ((low as u32) & 0xFFFF);
+        Self::new_with_size_and_voltage(4, voltage)
+    }
+
+    fn new_with_size_and_voltage(size: usize, volt: u32) -> DACVoltage {
         let mut vec: Vec<u32> = Vec::with_capacity(size);
 
         for _ in 0..size {
-            vec.push(DACVZERO);
+            vec.push(volt);
         }
 
         DACVoltage { values: vec }

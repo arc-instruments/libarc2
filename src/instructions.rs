@@ -244,6 +244,30 @@ impl SetDAC {
                                &Empty::new()])
     }
 
+    /// Create a new instruction that grounds all channels
+    pub fn new_all_ground() -> Self {
+        let mut instr = SetDAC::create();
+        instr.push_register(&OpCode::SetDAC);
+        instr.push_register(&DACMask::ALL);
+        instr.push_register(&Empty::new());
+        instr.push_register(&Empty::new());
+        instr.push_register(&DACVoltage::new());
+
+        instr
+    }
+
+    /// Create a new instruction with all channels set at
+    /// the specified levels
+    pub fn new_all_at_bias(low: u16, high: u16) -> Self {
+        let mut instr = SetDAC::create();
+        instr.push_register(&OpCode::SetDAC);
+        instr.push_register(&DACMask::ALL);
+        instr.push_register(&Empty::new());
+        instr.push_register(&Empty::new());
+        instr.push_register(&DACVoltage::new_at_levels(low, high));
+
+        instr
+    }
 
     /// Create a new logic instruction
     ///
@@ -294,6 +318,10 @@ impl SetDAC {
     /// (channel idx, DAC- voltage, DAC+ voltage)
     /// ```
     ///
+    /// If `clear` is set to `Some<(low, high)>` an additional instruction will
+    /// be emitted to ensure that all clusters are set to the specified voltage
+    /// _before_ any further SetDAC instructions are emitted.
+    ///
     /// ## Example
     /// ```
     /// use libarc2::instructions::{SetDAC, Instruction};
@@ -303,7 +331,7 @@ impl SetDAC {
     ///     (58, 0x7000, 0x7000), (2,  0x6000, 0x7000),
     /// ];
     ///
-    /// let mut instructions = SetDAC::from_channels(&input);
+    /// let mut instructions = SetDAC::from_channels(&input, None);
     ///
     /// assert_eq!(instructions.len(), 3);
     /// assert_eq!(instructions[0].compile().view(),
@@ -316,9 +344,35 @@ impl SetDAC {
     ///     &[0x00000001, 0x00000001, 0x00000000, 0x00000000, 0x80008000,
     ///       0x80008000, 0x70006000, 0x80008000, 0x80008000]);
     ///
+    /// // If `clear` is set an additional instruction will be
+    /// // emitted first to set all channels to the specified voltage.
+    /// // In this case all inactive channels are at 0.0 V.
+    /// let mut instructions = SetDAC::from_channels(&input, Some((0x8000, 0x8000)));
+    ///
+    /// assert_eq!(instructions.len(), 4);
+    /// assert_eq!(instructions[0].compile().view(),
+    ///     &[0x00000001, 0x0000ffff, 0x00000000, 0x00000000, 0x80008000,
+    ///       0x80008000, 0x80008000, 0x80008000, 0x80008000]);
+    /// assert_eq!(instructions[1].compile().view(),
+    ///     &[0x00000001, 0x00000801, 0x00000000, 0x00000000, 0x8ccc8ccc,
+    ///       0x80008000, 0x8ccc8ccc, 0x80008000, 0x80008000]);
+    /// assert_eq!(instructions[2].compile().view(),
+    ///     &[0x00000001, 0x00004008, 0x00000000, 0x00000000, 0x70006000,
+    ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
+    /// assert_eq!(instructions[3].compile().view(),
+    ///     &[0x00000001, 0x00000001, 0x00000000, 0x00000000, 0x80008000,
+    ///       0x80008000, 0x70006000, 0x80008000, 0x80008000]);
+    ///
     /// ```
-    pub fn from_channels(input: &[(u16, u16, u16)]) -> Vec<Self> {
+    pub fn from_channels(input: &[(u16, u16, u16)], clear: Option<(u16, u16)>) -> Vec<Self> {
         let mut result: Vec<SetDAC> = Vec::new();
+
+        match clear {
+            Some((low, high)) => {
+                result.push(SetDAC::new_all_at_bias(low, high))
+            }
+            None => {}
+        }
 
         // Key is the voltage, value is the DACChannel with the rest of the
         // information related to that channel. This peculiar hashmap

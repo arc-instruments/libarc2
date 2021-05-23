@@ -357,7 +357,7 @@ impl Instrument {
         -> Result<Chunk, String> {
 
         // generate a list of dac settings, only one channel in this case
-        let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)]);
+        let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)], None);
 
         // process them with the appropriate delay
         for mut instr in setdacs {
