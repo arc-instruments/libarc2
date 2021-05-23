@@ -5,7 +5,7 @@ use ndarray::{Array, Ix1, Ix2};
 use crate::instructions::*;
 use crate::registers::{DACMask, DACVoltage, ChannelState, ADCMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
-use crate::memory::{MemMan};
+use crate::memory::{MemMan, Chunk};
 
 const EFM03_VID: u16 = 0x10f8;
 const EFM03_PID: u16 = 0xc583;
@@ -350,6 +350,47 @@ impl Instrument {
         Ok(self)
     }
 
+
+    /// Common read functionality with one low channel and several high channels.
+    /// This function is guaranteed never to flush the output.
+    fn _read_slice_inner(&mut self, low: usize, highs: &[usize], vread: u16)
+        -> Result<Chunk, String> {
+
+        // generate a list of dac settings, only one channel in this case
+        let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)]);
+
+        // process them with the appropriate delay
+        for mut instr in setdacs {
+            self.process(instr.compile())?;
+        }
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(10_000u128)?;
+
+        // set all channels to Arbitrary Voltage
+        let mut channelconf =
+            UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
+        self.process(channelconf.compile())?;
+
+        // set all channel to output
+        let mut ioconf = UpdateLogic::new(true, true);
+        self.process(ioconf.compile())?;
+
+        // Prepare the ADC mask for the readout
+        let mut adcmask = ADCMask::new();
+
+        for chan in highs {
+            adcmask.set_enabled(*chan, true);
+        }
+
+        let chunk = self.memman.alloc_chunk().unwrap();
+        let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
+        self.process(currentread.compile())?;
+        self.add_delay(1_000u128)?;
+
+        // The read operation has been assembled, return back the readout address.
+        Ok(chunk)
+    }
+
     /// Perform a current read between the specified channels. A voltage
     /// of `-vread` will be applied to the `low` channel and current will
     /// be read from the `high` channel.
@@ -358,64 +399,13 @@ impl Instrument {
         // Reset DAC configuration
         self.reset_dacs()?;
 
-        // +--------------------------+
-        // | Output DAC configuration |
-        // +--------------------------+
+        // Initiate a read operation, get the address of the data to be...
+        let mut chunk = self._read_slice_inner(low, &[high], vidx!(-vread))?;
 
-        // Create a channel mask containing only one channel
-        // (the biasing one)
-        let mut chanmask = DACMask::NONE;
-        chanmask.set_channel(low);
+        // ... and finally withdraw voltage from the biasing channels
+        self.ground_all()?.execute()?;
 
-        // Convert the voltage into a DAC value
-        let voltage = vidx!(-vread);
-        let mut dacvoltage = DACVoltage::new();
-        // Set the DAC-/DAC+ channels halves of the DAC
-        dacvoltage.set(low % dacvoltage.len(), voltage);
-
-        // Make the SetDAC instruction for the biasing channel
-        let mut setdac = SetDAC::with_regs(&chanmask, &dacvoltage);
-        self.process(setdac.compile())?;
-        self.process(&*UPDATE_DAC)?;
-        self.add_delay(10_000u128)?;
-
-        // +------------------------------+
-        // | Output Channel configuration |
-        // +------------------------------+
-
-        // set all channels to Arbitrary Voltage
-        let mut channelconf =
-            UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
-        self.process(channelconf.compile())?;
-
-        // +------------------+
-        // | IO configuration |
-        // +------------------+
-
-        // set all channel to output
-        let mut ioconf = UpdateLogic::new(true, true);
-        self.process(ioconf.compile())?;
-
-        // +-------------+
-        // | CurrentRead |
-        // +-------------+
-
-        // Get a new memory address to store data
-        let mut chunk = self.memman.alloc_chunk().unwrap();
-
-        // Create a mask containing the read-out channel
-        let mut adcmask = ADCMask::new();
-        adcmask.set_enabled(high, true);
-
-        let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
-        self.process(currentread.compile())?;
-        self.add_delay(1_000u128)?;
-
-        // And reset the DACs, removing all biasing
-        // This will also flush the write buffer loading
-        // the instructions on the FPGA
-        self.reset_dacs()?;
-
+        // Read the data from the address chunk
         let data = self.read_raw(chunk.addr())?;
 
         // Assemble the number from the 4 neighbouring bytes
@@ -444,43 +434,6 @@ impl Instrument {
         // Reset DAC configuration
         self.reset_dacs()?;
 
-        // Create a channel mask containing only one channel
-        // (the biasing one)
-        let mut chanmask = DACMask::NONE;
-        chanmask.set_channel(chan);
-
-        // Convert the voltage into a DAC value
-        let voltage = vidx!(-vread);
-        let mut dacvoltage = DACVoltage::new();
-        // Set the DAC-/DAC+ channels halves of the DAC
-        dacvoltage.set(chan % dacvoltage.len(), voltage);
-
-        // Make the SetDAC instruction for the biasing channel
-        let mut setdac = SetDAC::with_regs(&chanmask, &dacvoltage);
-        self.process(setdac.compile())?;
-        self.process(&*UPDATE_DAC)?;
-        self.add_delay(10_000u128)?;
-
-        // +------------------------------+
-        // | Output Channel configuration |
-        // +------------------------------+
-
-        // set all channels to Arbitrary Voltage
-        let mut channelconf =
-            UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
-        self.process(channelconf.compile())?;
-
-        // +------------------+
-        // | IO configuration |
-        // +------------------+
-
-        // set all channel to output
-        let mut ioconf = UpdateLogic::new(true, true);
-        self.process(ioconf.compile())?;
-
-        // Get a new memory address to current data
-        let mut chunk = self.memman.alloc_chunk().unwrap();
-
         let mut channels: Vec<usize> = Vec::with_capacity(32);
 
         // Channels 0..16 and 32..48 correspond to rows
@@ -497,25 +450,11 @@ impl Instrument {
             channels.append(&mut (32usize..48).collect::<Vec<usize>>());
         }
 
-        // +-------------+
-        // | CurrentRead |
-        // +-------------+
+        // Initiate a read operation get the address of the data to be...
+        let mut chunk = self._read_slice_inner(chan, &channels, vidx!(-vread))?;
 
-        // Prepare the ADC mask for the readout
-        let mut adcmask = ADCMask::new();
-
-        for chan in &channels {
-            adcmask.set_enabled(*chan, true);
-        }
-
-        let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
-        self.process(currentread.compile())?;
-        self.add_delay(1_000u128)?;
-
-        // And reset the DACs, removing all biasing
-        // This will also flush the write buffer loading
-        // the instructions on the FPGA
-        self.reset_dacs()?;
+        // ... and finally withdraw voltage from the biasing channels
+        self.ground_all()?.execute()?;
 
         // Make an array to hold all the values of row/column
         let mut res: Vec<f32> = Vec::with_capacity(32);
