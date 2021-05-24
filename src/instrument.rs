@@ -356,8 +356,10 @@ impl Instrument {
     fn _read_slice_inner(&mut self, low: usize, highs: &[usize], vread: u16)
         -> Result<Chunk, String> {
 
+        let zero: u16 = vidx!(0.0);
+
         // generate a list of dac settings, only one channel in this case
-        let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)], None);
+        let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)], (zero, zero), false);
 
         // process them with the appropriate delay
         for mut instr in setdacs {

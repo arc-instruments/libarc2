@@ -1249,6 +1249,10 @@ impl DACVoltage {
         DACVoltage { values: vec }
     }
 
+    pub(crate) fn from_raw_values(values: &[u32]) -> DACVoltage {
+        DACVoltage { values: values.to_vec() }
+    }
+
     /// Set the Vhigh value of a specified channel index
     pub fn set_high(&mut self, idx: usize, voltage: u16) {
         self.values[idx] = (voltage as u32) << 16 |

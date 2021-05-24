@@ -34,6 +34,12 @@ macro_rules! make_vec_instr_impl {
     }
 }
 
+macro_rules! dacvoltage {
+    ($low: expr, $high: expr) => {
+        (($high as u32) << 16) | (($low as u32) & 0xFFFF);
+    }
+}
+
 
 /// Common behaviour of all available instructions.
 ///
@@ -317,9 +323,11 @@ impl SetDAC {
     /// ```text
     /// (channel idx, DAC- voltage, DAC+ voltage)
     /// ```
+    /// Unselected channels will be set to whatever the `base` argument indicates.
+    /// Again the format is (DAC- voltage, DAC+ voltage).
     ///
-    /// If `clear` is set to `Some<(low, high)>` an additional instruction will
-    /// be emitted to ensure that all clusters are set to the specified voltage
+    /// If `clear` is set to true an additional instruction will
+    /// be emitted to ensure that all clusters are set to `base` voltage
     /// _before_ any further SetDAC instructions are emitted.
     ///
     /// ## Example
@@ -327,123 +335,110 @@ impl SetDAC {
     /// use libarc2::instructions::{SetDAC, Instruction};
     ///
     /// let input: Vec<(u16, u16, u16)> = vec![
-    ///     ( 0, 0x8ccc, 0x8ccc), (46, 0x8ccc, 0x8ccc), (12, 0x6000, 0x7000),
-    ///     (58, 0x7000, 0x7000), (2,  0x6000, 0x7000),
+    ///    ( 0, 0x8ccc, 0x8ccc), ( 1, 0x8ccc, 0x8ccc), ( 2, 0x6000, 0x7000),
+    ///    ( 4, 0x8ccc, 0x8ccc), ( 5, 0x8ccc, 0x8ccc), ( 6, 0x6000, 0x7000),
+    ///    (12, 0x8ccc, 0x8ccc), (13, 0x8ccc, 0x8ccc), (14, 0x6000, 0x7000),
+    ///    (22, 0x7000, 0x7000), (17, 0x6000, 0x7000), (63, 0x7000, 0x9000)
     /// ];
     ///
-    /// let mut instructions = SetDAC::from_channels(&input, None);
+    /// let mut instructions = SetDAC::from_channels(&input, (0x8000, 0x8000), false);
     ///
-    /// assert_eq!(instructions.len(), 3);
+    /// assert_eq!(instructions.len(), 4);
     /// assert_eq!(instructions[0].compile().view(),
-    ///     &[0x00000001, 0x00000801, 0x00000000, 0x00000000, 0x8ccc8ccc,
-    ///       0x80008000, 0x8ccc8ccc, 0x80008000, 0x80008000]);
+    ///     &[0x00000001, 0x0000000b, 0x00000000, 0x00000000, 0x8ccc8ccc,
+    ///       0x8ccc8ccc, 0x70006000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[1].compile().view(),
-    ///     &[0x00000001, 0x00004008, 0x00000000, 0x00000000, 0x70006000,
-    ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
+    ///     &[0x00000001, 0x00000010, 0x00000000, 0x00000000, 0x80008000,
+    ///       0x70006000, 0x80008000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[2].compile().view(),
-    ///     &[0x00000001, 0x00000001, 0x00000000, 0x00000000, 0x80008000,
-    ///       0x80008000, 0x70006000, 0x80008000, 0x80008000]);
+    ///     &[0x00000001, 0x00000020, 0x00000000, 0x00000000, 0x80008000,
+    ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
+    /// assert_eq!(instructions[3].compile().view(),
+    ///     &[0x00000001, 0x00008000, 0x00000000, 0x00000000, 0x80008000,
+    ///       0x80008000, 0x80008000, 0x90007000, 0x80008000]);
     ///
     /// // If `clear` is set an additional instruction will be
     /// // emitted first to set all channels to the specified voltage.
     /// // In this case all inactive channels are at 0.0 V.
-    /// let mut instructions = SetDAC::from_channels(&input, Some((0x8000, 0x8000)));
+    /// let mut instructions = SetDAC::from_channels(&input, (0x8000, 0x8000), true);
     ///
-    /// assert_eq!(instructions.len(), 4);
+    /// assert_eq!(instructions.len(), 5);
     /// assert_eq!(instructions[0].compile().view(),
     ///     &[0x00000001, 0x0000ffff, 0x00000000, 0x00000000, 0x80008000,
     ///       0x80008000, 0x80008000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[1].compile().view(),
-    ///     &[0x00000001, 0x00000801, 0x00000000, 0x00000000, 0x8ccc8ccc,
-    ///       0x80008000, 0x8ccc8ccc, 0x80008000, 0x80008000]);
+    ///     &[0x00000001, 0x0000000b, 0x00000000, 0x00000000, 0x8ccc8ccc,
+    ///       0x8ccc8ccc, 0x70006000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[2].compile().view(),
-    ///     &[0x00000001, 0x00004008, 0x00000000, 0x00000000, 0x70006000,
-    ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
+    ///     &[0x00000001, 0x00000010, 0x00000000, 0x00000000, 0x80008000,
+    ///       0x70006000, 0x80008000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[3].compile().view(),
-    ///     &[0x00000001, 0x00000001, 0x00000000, 0x00000000, 0x80008000,
-    ///       0x80008000, 0x70006000, 0x80008000, 0x80008000]);
+    ///     &[0x00000001, 0x00000020, 0x00000000, 0x00000000, 0x80008000,
+    ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
+    /// assert_eq!(instructions[4].compile().view(),
+    ///     &[0x00000001, 0x00008000, 0x00000000, 0x00000000, 0x80008000,
+    ///       0x80008000, 0x80008000, 0x90007000, 0x80008000]);
     ///
     /// ```
-    pub fn from_channels(input: &[(u16, u16, u16)], clear: Option<(u16, u16)>) -> Vec<Self> {
+    pub fn from_channels(input: &[(u16, u16, u16)], base: (u16, u16), clear: bool) -> Vec<Self> {
         let mut result: Vec<SetDAC> = Vec::new();
 
-        match clear {
-            Some((low, high)) => {
-                result.push(SetDAC::new_all_at_bias(low, high))
-            }
-            None => {}
+        let (low, high) = (base.0, base.1);
+
+        if clear {
+            result.push(SetDAC::new_all_at_bias(low, high));
         }
 
-        // Key is the voltage, value is the DACChannel with the rest of the
-        // information related to that channel. This peculiar hashmap
-        // holds the channels that correspond to each one of the four
-        // words describing the voltages of a half cluster
-        let mut offsets: [HashMap<u32, Vec<DACChannel>>; 4] = Default::default();
-        // A list of lists of the keys found above without having to deal
-        // with the HashMap::keys() nonsense.
-        let mut keys: [Vec<u32>; 4] = Default::default();
+        let mut channels: [(u16, u16); 64] = [(low, high); 64];
+        let mut bucket: HashMap<[u32; 4], Vec<u16>> = HashMap::new();
+        let mut keys: Vec<[u32; 4]> = Vec::with_capacity(64);
 
-        // Identify unique voltages across the provided channels
-        for (chan, low, high) in input {
-
-            // Create a new channel descriptor, offset calculated
-            // automatically. Channel 6 is half-cluster 1, offset 2
-            // (0-indexed).
-            let desc = DACChannel::new_from_both(*low, *high, *chan);
-            let offset = desc.offset;
-
-            // Use the entry that corresponds to the calculated
-            // offset
-            let bucket = &mut offsets[offset as usize];
-            let keys = &mut keys[offset as usize];
-
-            // If the voltage combination has been used before add the
-            // channel to the list of channels that have the same voltage.
-            // If not, make a new entry (voltage key)
-            if bucket.contains_key(&desc.voltage()) {
-                let entry = bucket.get_mut(&desc.voltage()).unwrap();
-                entry.push(desc);
-            } else {
-                keys.push(desc.voltage());
-                bucket.insert(desc.voltage(), vec![desc]);
-            }
-
+        for (idx, low, high) in input {
+            channels[*idx as usize] = (*low, *high);
         }
 
-        // Find the longest offset list
-        let veclen: Vec<usize> = keys.iter().map(|s| s.len()).collect();
-        let max_len = veclen.iter().max().unwrap();
+        for (idx, chunk) in channels.chunks(4usize).enumerate() {
 
-        // BEHOLD: THE TRIPLE LOOP!
-        // Traverse the offset list, this is essentially a crude rendition
-        // of the python zip_longest function. It might need some optimisation
-        // further down the road.
-        for i in 0..*max_len {
-
-            let mut mask = DACMask::NONE;
-            let mut volts = DACVoltage::new();
-
-            for j in 0..offsets.len() {
-                let offs = &offsets[j];
-                let keys = &keys[j];
-
-                // This offset list is empty; no values for this offset
-                if i >= offs.len() { continue; }
-
-                let key: u32 = keys[i];
-                // Set the voltages for the individual channels
-                for chan in offs.get(&key).unwrap() {
-                    mask.set_channel(chan.channel as usize);
-                    volts.set_low(chan.offset as usize, chan.low);
-                    volts.set_high(chan.offset as usize, chan.high);
+            let unchanged: bool = {
+                let mut res = true;
+                for (clow, chigh) in chunk {
+                    if *clow != low || *chigh != high {
+                        res = false;
+                        break;
+                    }
                 }
+                res
+            };
+
+            if unchanged { continue; }
+
+            let key = {
+                let mut res: [u32; 4] = [0x80008000; 4];
+                for _idx in 0..4usize {
+                    let value = chunk[_idx];
+                    res[_idx as usize] = dacvoltage!(value.0, value.1);
+                }
+                res
+            };
+
+            if bucket.contains_key(&key) {
+                let entry = bucket.get_mut(&key).unwrap();
+                entry.push(2u16.pow(idx as u32) as u16);
+            } else {
+                keys.push(key);
+                bucket.insert(key, vec![2u16.pow(idx as u32) as u16]);
             }
 
-            // assemble the instruction from parts
-            let instruction = SetDAC::with_regs(&mask, &volts);
-            result.push(instruction);
-
         }
+
+        for key in keys {
+            let bits: u32 = (*bucket.get(&key).unwrap()).iter().sum::<u16>() as u32;
+            let mask = DACMask::from_bits(bits).unwrap();
+            let voltages = DACVoltage::from_raw_values(&key);
+
+            result.push(SetDAC::with_regs(&mask, &voltages));
+        }
+
 
         result
     }
@@ -463,37 +458,6 @@ impl SetDAC {
 }
 
 impl Instruction for SetDAC { make_vec_instr_impl!(SetDAC, instrs); }
-
-
-/// A DAC Channel specification, used by SetDAC::from_channels
-#[derive(Hash, Debug)]
-struct DACChannel {
-    low: u16,
-    high: u16,
-    channel: u16,
-    cluster: u16,
-    offset: u16
-}
-
-impl DACChannel {
-    /*fn new(voltage: u16, channel: u16) -> Self {
-        Self::new_from_both(voltage, voltage, channel)
-    }*/
-
-    fn new_from_both(low: u16, high: u16, channel: u16) -> Self {
-        DACChannel {
-            low: low,
-            high: high,
-            channel: channel,
-            cluster: channel / 4u16,
-            offset: channel % 4u16
-        }
-    }
-
-    fn voltage(&self) -> u32 {
-        ((self.high as u32) << 16) | ((self.low as u32) & 0xFFFF)
-    }
-}
 
 
 /// Set channel configuration
