@@ -271,7 +271,7 @@ impl Instrument {
                 }
                 #[cfg(feature="dummy_writes")] {
                     eprintln!("DW: {:?}", buf);
-                    Ok(())
+                    Ok(self)
                 }
             },
             None => Ok(self)
