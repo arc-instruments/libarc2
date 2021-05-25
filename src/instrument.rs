@@ -3,7 +3,7 @@ use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
 
 use crate::instructions::*;
-use crate::registers::{DACMask, DACVoltage, ChannelState, ADCMask};
+use crate::registers::{ChannelState, ADCMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
 use crate::memory::{MemMan, Chunk};
 
@@ -594,57 +594,43 @@ impl Instrument {
         Ok(self)
     }
 
-    /// Setup the biasing channels for single pulsing. This function will setup the
-    /// output DACs for pulsing of a single crosspoint. It will set the high channel
-    /// to `voltage/2` and the low channel to `-voltage/2`. If the `differential`
-    /// argument is true then the DACs will be setup for high-speed differential
-    /// pulsing as required by the High Speed drivers. No delays are introduced
-    /// here as this will be handled either by a standard Delay instruction or
-    /// a High Speed timer.
-    fn _setup_dacs_for_single_pulsing(&mut self, low: usize, high: usize,
-        voltage: f32, differential: bool) -> Result<(), String> {
-        //
-        // Set high channel to voltage/2
-        let mut highmask = DACMask::NONE;
-        highmask.set_channel(high);
+    /// Setup the biasing channels for multi-channel pulsing. This function will setup
+    /// the output DACs for pulsing of a single crosspoint. The `config` argument
+    /// holds a list of bias pairs in the form of `(low ch, high ch, voltage)`.
+    /// This function will set the high channel to `voltage/2` and the low channel
+    /// to `-voltage/2`. If the `high_speed` argument is true then the DACs will
+    /// be setup for high-speed differential pulsing as required by the High Speed
+    /// drivers. No delays are introduced here as this will be handled either by a
+    /// standard Delay instruction or a High Speed timer.
+    fn _setup_dacs_for_pulsing(&mut self, config: &[(usize, usize, f32)], high_speed: bool)
+        -> Result<(), String> {
 
-        let mut high_v = DACVoltage::new();
-        if differential {
-            // in differential biasing we need to ensure that DAC+ is higher than DAC-
-            if voltage > 0.0 {
-                high_v.set_high(high % high_v.len(), vidx!(voltage/2.0));
-                high_v.set_low(high % high_v.len(), vidx!(0.0));
+        // (idx, low, high); as required by SetDAC::from_channels().
+        let mut channels: Vec<(u16, u16, u16)> = Vec::with_capacity(config.len()*2usize);
+
+        for conf in config {
+            let (low_ch, high_ch, voltage) = (conf.0, conf.1, conf.2);
+
+            if high_speed {
+                if voltage > 0.0 {
+                    channels.push((high_ch as u16, vidx!(0.0), vidx!(voltage/2.0)));
+                    channels.push((low_ch as u16, vidx!(-voltage/2.0), vidx!(0.0)));
+                } else {
+                    channels.push((high_ch as u16, vidx!(voltage/2.0), vidx!(0.0)));
+                    channels.push((low_ch as u16, vidx!(0.0), vidx!(-voltage/2.0)));
+                }
             } else {
-                high_v.set_low(high % high_v.len(), vidx!(voltage/2.0));
-                high_v.set_high(high % high_v.len(), vidx!(0.0));
+                channels.push((high_ch as u16, vidx!(voltage/2.0), vidx!(voltage/2.0)));
+                channels.push((low_ch as u16, vidx!(-voltage/2.0), vidx!(-voltage/2.0)));
             }
-        } else {
-            // otherwise both DAC+ and DAC- are the same value
-            high_v.set(high % high_v.len(), vidx!(voltage/2.0));
+
         }
 
-        // Set low channel to -voltage/2
-        let mut lowmask = DACMask::NONE;
-        lowmask.set_channel(low);
-
-        let mut low_v = DACVoltage::new();
-        if differential {
-            if voltage < 0.0 {
-                low_v.set_high(low % low_v.len(), vidx!(-voltage/2.0));
-                low_v.set_low(low % low_v.len(), vidx!(0.0));
-            } else {
-                low_v.set_low(low % low_v.len(), vidx!(-voltage/2.0));
-                low_v.set_high(low % low_v.len(), vidx!(0.0));
-            }
-        } else {
-            low_v.set(low % low_v.len(), vidx!(-voltage/2.0));
+        let instrs = SetDAC::from_channels(&channels, (vidx!(0.0), vidx!(0.0)), false);
+        for mut i in instrs {
+            self.process(i.compile())?;
         }
 
-        let mut setdac_high = SetDAC::with_regs(&highmask, &high_v);
-        let mut setdac_low = SetDAC::with_regs(&lowmask, &low_v);
-
-        self.process(setdac_high.compile())?;
-        self.process(setdac_low.compile())?;
         self.process(&*UPDATE_DAC)
 
     }
@@ -663,7 +649,7 @@ impl Instrument {
         self.process(conf.compile())?;
 
         // setup a non-differential pulsing scheme
-        self._setup_dacs_for_single_pulsing(low, high, voltage, false)?;
+        self._setup_dacs_for_pulsing(&[(low, high, voltage)], false)?;
         self.add_delay(nanos+10_000u128)?;
         self.ground_all()
 
@@ -683,7 +669,7 @@ impl Instrument {
         self.process(conf.compile())?;
 
         // setup a differential pulsing scheme
-        self._setup_dacs_for_single_pulsing(low, high, voltage, true)?;
+        self._setup_dacs_for_pulsing(&[(low, high, voltage)], true)?;
         self.add_delay(10_000u128)?;
 
         let mut timings: [u32; 8] = [0u32; 8];
