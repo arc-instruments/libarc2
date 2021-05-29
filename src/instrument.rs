@@ -530,6 +530,79 @@ impl Instrument {
         Ok(res)
     }
 
+    /// Read the specified high channels that have `chan` as the low potential channel
+    ///
+    /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
+    /// to a row read at `vread` in a standard 32×32 array, otherwise it's a column read.
+    /// This is equivalent to read_slice but replaces channels not contained in the
+    /// mask with `f32::NAN`.
+    pub fn read_slice_masked(&mut self, chan: usize, mask: &[usize], vread: f32) -> Result<Vec<f32>, String> {
+
+        // Reset DAC configuration
+        self.reset_dacs()?;
+
+        let all_channels: &HashSet<usize>;
+
+        // Channels 0..16 and 32..48 correspond to rows
+        // so we want to read from all the columns in the
+        // row
+        if (chan < 16) || ((32 <= chan) && (chan < 48)) {
+            all_channels = &*ALL_WORDS_SET;
+        // Or the other way around. Channels 16..32 and
+        // 48..64 correspond to columns so we want to read
+        // from all the rows in the column.
+        } else {
+            all_channels = &*ALL_BITS_SET;
+        }
+
+        // Initiate a read operation get the address of the data to be...
+        let mut chunk = self._read_slice_inner(chan, &mask, vidx!(-vread))?;
+
+        // ... and finally withdraw voltage from the biasing channels
+        self.ground_all()?.execute()?;
+
+        // Make an array to hold all the values of row/column
+        let mut res: Vec<f32> = Vec::with_capacity(32);
+
+        // Read the raw chunk of data
+        let data = self.read_raw(chunk.addr())?;
+
+        // Convert adc values to current
+        for chan in all_channels {
+
+            if all_channels.contains(&chan) {
+                let raw_value = u32::from_le_bytes([data[4*chan+0],
+                    data[4*chan+1], data[4*chan+2], data[4*chan+3]]);
+                let cur = if chan % 2 == 0 {
+                    _adc_to_current(raw_value)
+                } else {
+                    -1.0*_adc_to_current(raw_value)
+                };
+                res.push(cur);
+            } else {
+                res.push(f32::NAN);
+            }
+        }
+
+        // Free up the FPGA chunk for reuse
+        match self.memman.free_chunk(&mut chunk) {
+            Ok(()) => {},
+            Err(_) => { return Err("Could not free up memory!!".to_string()); }
+        }
+
+        Ok(res)
+    }
+
+    /// Same as [`Instrument::read_slice_masked`] but returning an [`Array`][`ndarray::Array`]
+    /// for numpy compatibility
+    pub fn read_slice_masked_as_ndarray(&mut self, chan: usize, mask: &[usize], vread: f32) ->
+        Result<Array<f32, Ix1>, String> {
+
+        let data = self.read_slice_masked(chan, mask, vread)?;
+        Ok(Array::from(data))
+
+    }
+
     /// Same as [`Instrument::read_slice`] but returning an [`Array`][`ndarray::Array`]
     /// for numpy compatibility
     pub fn read_slice_as_ndarray(&mut self, chan: usize, vread: f32) -> Result<Array<f32, Ix1>, String> {
