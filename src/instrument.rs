@@ -1,4 +1,5 @@
 use std::{time, thread};
+use std::collections::HashSet;
 use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
 
@@ -50,6 +51,50 @@ lazy_static! {
 
         instr.compile();
         instr
+    };
+
+    static ref ALL_WORDS: Vec<usize> = {
+        let mut channels: Vec<usize> = Vec::with_capacity(32);
+        channels.append(&mut (16usize..32).collect::<Vec<usize>>());
+        channels.append(&mut (48usize..64).collect::<Vec<usize>>());
+
+        channels
+    };
+
+    static ref ALL_WORDS_SET: HashSet<usize> = {
+        let mut set: HashSet<usize> = HashSet::with_capacity(32);
+
+        for i in 16usize..32 {
+            set.insert(i);
+        }
+
+        for i in 48usize..64 {
+            set.insert(i);
+        }
+
+        set
+    };
+
+    static ref ALL_BITS: Vec<usize> = {
+        let mut channels: Vec<usize> = Vec::with_capacity(32);
+        channels.append(&mut ( 0usize..16).collect::<Vec<usize>>());
+        channels.append(&mut (32usize..48).collect::<Vec<usize>>());
+
+        channels
+    };
+
+    static ref ALL_BITS_SET: HashSet<usize> = {
+        let mut set: HashSet<usize> = HashSet::with_capacity(32);
+
+        for i in  0usize..16 {
+            set.insert(i);
+        }
+
+        for i in 32usize..48 {
+            set.insert(i);
+        }
+
+        set
     };
 }
 
