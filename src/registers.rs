@@ -67,10 +67,11 @@ mod wordreg {
 use wordreg::WordSize;
 
 
-mod consts {
+pub(crate) mod consts {
     use super::DACMask;
+    use super::ClusterMask;
 
-    pub(super) const CHANMAP: [DACMask; 64] = [
+    pub(crate) const CHANMAP: [DACMask; 64] = [
         DACMask::CH00_03, DACMask::CH00_03, DACMask::CH00_03, DACMask::CH00_03,
         DACMask::CH04_07, DACMask::CH04_07, DACMask::CH04_07, DACMask::CH04_07,
         DACMask::CH08_11, DACMask::CH08_11, DACMask::CH08_11, DACMask::CH08_11,
@@ -89,6 +90,16 @@ mod consts {
         DACMask::CH60_63, DACMask::CH60_63, DACMask::CH60_63, DACMask::CH60_63
     ];
 
+    pub(crate) const HSCLUSTERMAP: [ClusterMask; 8] = [
+        ClusterMask::CL0,
+        ClusterMask::CL1,
+        ClusterMask::CL2,
+        ClusterMask::CL3,
+        ClusterMask::CL4,
+        ClusterMask::CL5,
+        ClusterMask::CL6,
+        ClusterMask::CL7,
+    ];
 
     pub(super) const CHANCONFSIZE: usize = 2;
     pub(super) const NCHANS: usize = 64;
@@ -301,23 +312,12 @@ bitflags! {
 
 impl ClusterMask {
 
-    const HSCLUSTERMAP: [ClusterMask; 8] = [
-        ClusterMask::CL0,
-        ClusterMask::CL1,
-        ClusterMask::CL2,
-        ClusterMask::CL3,
-        ClusterMask::CL4,
-        ClusterMask::CL5,
-        ClusterMask::CL6,
-        ClusterMask::CL7,
-    ];
-
     /// Create a new [`ClusterMask`] by providing a slice of
     /// clusters instead of a bitmask.
     pub fn new_from_cluster_idx(clusters: &[u8]) -> Self {
         let mut mask = ClusterMask::NONE;
         for cl in clusters {
-            mask |= Self::HSCLUSTERMAP[*cl as usize];
+            mask |= consts::HSCLUSTERMAP[*cl as usize];
         }
 
         mask
