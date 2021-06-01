@@ -481,20 +481,18 @@ impl Instrument {
         // Reset DAC configuration
         self.reset_dacs()?;
 
-        let mut channels: Vec<usize> = Vec::with_capacity(32);
+        let channels: &Vec<usize>;
 
         // Channels 0..16 and 32..48 correspond to rows
         // so we want to read from all the columns in the
         // row
         if (chan < 16) || ((32 <= chan) && (chan < 48)) {
-            channels.append(&mut (16usize..32).collect::<Vec<usize>>());
-            channels.append(&mut (48usize..64).collect::<Vec<usize>>());
+            channels = &*ALL_WORDS;
         // Or the other way around. Channels 16..32 and
         // 48..64 correspond to columns so we want to read
         // from all the rows in the column.
         } else {
-            channels.append(&mut ( 0usize..16).collect::<Vec<usize>>());
-            channels.append(&mut (32usize..48).collect::<Vec<usize>>());
+            channels = &*ALL_BITS;
         }
 
         // Initiate a read operation get the address of the data to be...
@@ -510,7 +508,7 @@ impl Instrument {
         let data = self.read_raw(chunk.addr())?;
 
         // Convert adc values to current
-        for chan in &channels {
+        for chan in channels {
             let raw_value = u32::from_le_bytes([data[4*chan+0],
                 data[4*chan+1], data[4*chan+2], data[4*chan+3]]);
             let cur = if chan % 2 == 0 {
@@ -629,23 +627,15 @@ impl Instrument {
     /// `[0..16)` and `[32..48)` (bitlines). Function [`Instrument::read_slice()`] is
     /// applied for every one of the selected channels.
     pub fn read_all(&mut self, vread: f32, order: BiasOrder) -> Result<Vec<f32>, String> {
-        let mut bias_channels: Vec<usize> = Vec::with_capacity(32);
 
         let mut results = Vec::with_capacity(32*32);
 
-        match order {
-            BiasOrder::Rows => {
-                bias_channels.append(&mut (16usize..32).collect::<Vec<usize>>());
-                bias_channels.append(&mut (48usize..64).collect::<Vec<usize>>());
-
-            },
-            BiasOrder::Columns => {
-                bias_channels.append(&mut ( 0usize..16).collect::<Vec<usize>>());
-                bias_channels.append(&mut (32usize..48).collect::<Vec<usize>>());
-            }
+        let bias_channels = match order {
+            BiasOrder::Rows => &*ALL_WORDS,
+            BiasOrder::Columns => &*ALL_BITS
         };
 
-        for chan in &bias_channels {
+        for chan in bias_channels {
             results.append(&mut self.read_slice(*chan, vread)?);
         }
 
