@@ -541,18 +541,25 @@ impl Instrument {
         // Reset DAC configuration
         self.reset_dacs()?;
 
-        let all_channels: &HashSet<usize>;
+        // We are using both the set and the vector to maintain
+        // numeric order of the channels. The set is only used
+        // for checking whether a particular channel is contained
+        // in the returning set of channels or not.
+        let all_channels: &Vec<usize>;
+        let all_channels_set: &HashSet<usize>;
 
         // Channels 0..16 and 32..48 correspond to rows
         // so we want to read from all the columns in the
         // row
         if (chan < 16) || ((32 <= chan) && (chan < 48)) {
-            all_channels = &*ALL_WORDS_SET;
+            all_channels = &*ALL_WORDS;
+            all_channels_set = &*ALL_WORDS_SET;
         // Or the other way around. Channels 16..32 and
         // 48..64 correspond to columns so we want to read
         // from all the rows in the column.
         } else {
-            all_channels = &*ALL_BITS_SET;
+            all_channels = &*ALL_BITS;
+            all_channels_set = &*ALL_BITS_SET;
         }
 
         // Initiate a read operation get the address of the data to be...
@@ -570,7 +577,7 @@ impl Instrument {
         // Convert adc values to current
         for chan in all_channels {
 
-            if all_channels.contains(&chan) {
+            if all_channels_set.contains(&chan) {
                 let raw_value = u32::from_le_bytes([data[4*chan+0],
                     data[4*chan+1], data[4*chan+2], data[4*chan+3]]);
                 let cur = if chan % 2 == 0 {
