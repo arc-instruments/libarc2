@@ -6,6 +6,7 @@ use ndarray::{Array, Ix1, Ix2};
 use crate::instructions::*;
 use crate::registers::{ChannelState, ADCMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
+use crate::registers::consts::HSCLUSTERMAP;
 use crate::memory::{MemMan, Chunk};
 
 const EFM03_VID: u16 = 0x10f8;
@@ -709,6 +710,22 @@ impl Instrument {
         Ok(self)
     }
 
+    /// Apply a pulse to all channels with `chan` as the low potential channel.
+    ///
+    /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
+    /// to a row pulse, otherwise it's a column pulse.
+    pub fn pulse_slice(&mut self, chan: usize, voltage: f32, nanos: u128) -> Result<&mut Self, String> {
+
+        // use the high speed driver for all pulses faster than 500 ms
+        if nanos < 500_000_000u128 {
+            self.pulse_slice_fast(chan, voltage, nanos)?;
+        } else {
+            self.pulse_slice_slow(chan, voltage, nanos)?;
+        }
+
+        Ok(self)
+    }
+
     /// Setup the biasing channels for multi-channel pulsing. This function will setup
     /// the output DACs for pulsing of a single crosspoint. The `config` argument
     /// holds a list of bias pairs in the form of `(low ch, high ch, voltage)`.
@@ -817,6 +834,115 @@ impl Instrument {
         self.process(pulse.compile())?;
         self.ground_all()
 
+    }
+
+    fn pulse_slice_slow(&mut self, chan: usize, voltage: f32, nanos: u128) ->
+        Result<&mut Self, String> {
+
+        let mut bias_conf = ChannelConf::new();
+        let bias_channels = if (chan < 16) || ((32 <= chan) && (chan < 48)) {
+            &*ALL_WORDS
+        } else {
+            &*ALL_BITS
+        };
+
+        let mut channel_pairs: Vec<(usize, usize, f32)> = Vec::with_capacity(32);
+
+        // Set all the channels involved in this operation to VoltArb
+        // first the low
+        bias_conf.set(chan, ChannelState::VoltArb);
+        for c in bias_channels {
+            // and all the highs
+            bias_conf.set(*c, ChannelState::VoltArb);
+            // and also add the pair to the channel_pairs vec above
+            channel_pairs.push((chan, *c, voltage));
+        }
+
+        let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
+        self.process(conf.compile())?;
+
+        // setup the pulsing scheme
+        self._setup_dacs_for_pulsing(&channel_pairs, false)?;
+        self.add_delay(nanos+10_000u128)?;
+        self.ground_all()?;
+
+        Ok(self)
+    }
+
+    fn pulse_slice_fast(&mut self, chan: usize, voltage: f32, nanos: u128) ->
+        Result<&mut Self, String> {
+
+        let mut bias_conf = ChannelConf::new();
+        let bias_channels = if (chan < 16) || ((32 <= chan) && (chan < 48)) {
+            &*ALL_WORDS
+        } else {
+            &*ALL_BITS
+        };
+
+        // (low/high) pulsing pairs
+        let mut channel_pairs: Vec<(usize, usize, f32)> = Vec::with_capacity(32);
+
+        // timings for the high speed clusters
+        let mut timings: [u32; 8] = [0u32; 8];
+
+        // high speed cluster mask
+        let mut hs_clusters = ClusterMask::NONE;
+        // inversion cluster mask
+        let mut inv_clusters = ClusterMask::NONE;
+        // cancel cluster mask
+        let cncl_clusters = ClusterMask::NONE;
+
+        // Set all the channels involved in this operation to High Speed
+        // first the low
+        bias_conf.set(chan, ChannelState::HiSpeed);
+        // Set the timing of the cluster where the low channel belongs to
+        timings[chan/8] = nanos as u32;
+        // and also mark it as high speed
+        hs_clusters |= HSCLUSTERMAP[chan/8];
+
+        // check where to set the inversion bit, if voltage > 0
+        // this should be done on the low channel (here) otherwise
+        // it will have to be done for the high channels (in the
+        // for loop below).
+        let inv_on_high = if voltage > 0.0 {
+            inv_clusters |= HSCLUSTERMAP[chan/8];
+            false
+        } else { true };
+
+        for c in bias_channels {
+            // and all the highs
+            bias_conf.set(*c, ChannelState::HiSpeed);
+            // add the (low, high) pair to the vec
+            channel_pairs.push((chan, *c, voltage));
+            // set the timing of the corresponding cluster
+            timings[*c/8] = nanos as u32;
+            // and mark the cluster as high speed
+            hs_clusters |= HSCLUSTERMAP[*c/8];
+
+            // in negative voltages the inversion bit must be
+            // set on the high channels
+            if inv_on_high {
+                inv_clusters |= HSCLUSTERMAP[*c/8];
+            }
+        }
+
+        let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
+        self.process(conf.compile())?;
+
+        self._setup_dacs_for_pulsing(&channel_pairs, true)?;
+        self.add_delay(10_000u128)?;
+
+        let mut hsconf = HSConfig::new(timings);
+        self.process(hsconf.compile())?;
+
+        let pulse_attrs = PulseAttrs::new_with_params(hs_clusters,
+            inv_clusters, cncl_clusters);
+
+        let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
+        self.process(pulse.compile())?;
+        self.ground_all()?;
+
+        Ok(self)
     }
 
 }
