@@ -730,11 +730,12 @@ impl Instrument {
     /// the output DACs for pulsing of a single crosspoint. The `config` argument
     /// holds a list of bias pairs in the form of `(low ch, high ch, voltage)`.
     /// This function will set the high channel to `voltage/2` and the low channel
-    /// to `-voltage/2`. If the `high_speed` argument is true then the DACs will
-    /// be setup for high-speed differential pulsing as required by the High Speed
-    /// drivers. No delays are introduced here as this will be handled either by a
-    /// standard Delay instruction or a High Speed timer.
-    fn _setup_dacs_for_pulsing(&mut self, config: &[(usize, usize, f32)], high_speed: bool)
+    /// to `-voltage/2` if `differential` is `true` otherwise it will apply `-voltage`
+    /// to the low channel and 0.0 to the high. If the `high_speed` argument is true
+    /// then the DACs will be setup for high-speed pulsing as required
+    /// by the High Speed drivers. No delays are introduced here as this will be
+    /// handled either by a standard Delay instruction or a High Speed timer.
+    fn _setup_dacs_for_pulsing(&mut self, config: &[(usize, usize, f32)], high_speed: bool, differential: bool)
         -> Result<(), String> {
 
         // (idx, low, high); as required by SetDAC::from_channels().
@@ -745,15 +746,30 @@ impl Instrument {
 
             if high_speed {
                 if voltage > 0.0 {
-                    channels.push((high_ch as u16, vidx!(0.0), vidx!(voltage/2.0)));
-                    channels.push((low_ch as u16, vidx!(-voltage/2.0), vidx!(0.0)));
+                    if differential {
+                        channels.push((high_ch as u16, vidx!(0.0), vidx!(voltage/2.0)));
+                        channels.push((low_ch as u16, vidx!(-voltage/2.0), vidx!(0.0)));
+                    } else {
+                        channels.push((high_ch as u16, vidx!(0.0), vidx!(0.0)));
+                        channels.push((low_ch as u16, vidx!(-voltage), vidx!(0.0)));
+                    }
                 } else {
-                    channels.push((high_ch as u16, vidx!(voltage/2.0), vidx!(0.0)));
-                    channels.push((low_ch as u16, vidx!(0.0), vidx!(-voltage/2.0)));
+                    if differential {
+                        channels.push((high_ch as u16, vidx!(voltage/2.0), vidx!(0.0)));
+                        channels.push((low_ch as u16, vidx!(0.0), vidx!(-voltage/2.0)));
+                    } else {
+                        channels.push((high_ch as u16, vidx!(0.0), vidx!(0.0)));
+                        channels.push((low_ch as u16, vidx!(0.0), vidx!(-voltage)));
+                    }
                 }
             } else {
-                channels.push((high_ch as u16, vidx!(voltage/2.0), vidx!(voltage/2.0)));
-                channels.push((low_ch as u16, vidx!(-voltage/2.0), vidx!(-voltage/2.0)));
+                if differential {
+                    channels.push((high_ch as u16, vidx!(voltage/2.0), vidx!(voltage/2.0)));
+                    channels.push((low_ch as u16, vidx!(-voltage/2.0), vidx!(-voltage/2.0)));
+                } else {
+                    channels.push((high_ch as u16, vidx!(0.0), vidx!(0.0)));
+                    channels.push((low_ch as u16, vidx!(-voltage), vidx!(-voltage)));
+                }
             }
 
         }
@@ -780,8 +796,8 @@ impl Instrument {
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
         self.process(conf.compile())?;
 
-        // setup a non-differential pulsing scheme
-        self._setup_dacs_for_pulsing(&[(low, high, voltage)], false)?;
+        // setup a non-high speed differential pulsing scheme
+        self._setup_dacs_for_pulsing(&[(low, high, voltage)], false, true)?;
         self.add_delay(nanos+10_000u128)?;
         self.ground_all()
 
@@ -800,8 +816,8 @@ impl Instrument {
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
         self.process(conf.compile())?;
 
-        // setup a differential pulsing scheme
-        self._setup_dacs_for_pulsing(&[(low, high, voltage)], true)?;
+        // setup a high-speed differential pulsing scheme
+        self._setup_dacs_for_pulsing(&[(low, high, voltage)], true, true)?;
         self.add_delay(10_000u128)?;
 
         let mut timings: [u32; 8] = [0u32; 8];
@@ -861,8 +877,8 @@ impl Instrument {
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
         self.process(conf.compile())?;
 
-        // setup the pulsing scheme
-        self._setup_dacs_for_pulsing(&channel_pairs, false)?;
+        // setup a non-high speed differential pulsing scheme
+        self._setup_dacs_for_pulsing(&channel_pairs, false, true)?;
         self.add_delay(nanos+10_000u128)?;
         self.ground_all()?;
 
@@ -914,7 +930,10 @@ impl Instrument {
             bias_conf.set(*c, ChannelState::HiSpeed);
             // add the (low, high) pair to the vec
             channel_pairs.push((chan, *c, voltage));
-            // set the timing of the corresponding cluster
+            // IMPORTANT! This assumes differential pulsing. If
+            // not then nanos should be set to 0 and
+            // `_setup_dacs_for_pulsing` should be called with
+            // differential set to false.
             timings[*c/8] = nanos as u32;
             // and mark the cluster as high speed
             hs_clusters |= HSCLUSTERMAP[*c/8];
@@ -929,7 +948,11 @@ impl Instrument {
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
         self.process(conf.compile())?;
 
-        self._setup_dacs_for_pulsing(&channel_pairs, true)?;
+        // setup a high speed differential pulsing scheme
+        // WARNING! If a non-differential pulse (last argument is `false`)
+        // is used instead `timings` for high channels above should be
+        // set to 0 ns.
+        self._setup_dacs_for_pulsing(&channel_pairs, true, true)?;
         self.add_delay(10_000u128)?;
 
         let mut hsconf = HSConfig::new(timings);
