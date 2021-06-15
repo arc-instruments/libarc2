@@ -968,6 +968,32 @@ impl Instrument {
         Ok(self)
     }
 
+    /// Pulse all crosspoints at the specified voltage and pulse width
+    ///
+    /// This function will pulse available crosspoints on the array. This can be done
+    /// either by high biasing the rows ([`BiasOrder::Rows`]) or columns ([`BiasOrder::Columns`]).
+    pub fn pulse_all(&mut self, voltage: f32, nanos: u128, order: BiasOrder) -> Result<&mut Self, String> {
+
+        let bias_channels = match order {
+            BiasOrder::Rows => &*ALL_WORDS,
+            BiasOrder::Columns => &*ALL_BITS
+        };
+
+        if nanos < 500_000_000u128 {
+            for chan in bias_channels {
+               self.pulse_slice_fast(*chan, voltage, nanos)?;
+            }
+
+        } else {
+            for chan in bias_channels {
+               self.pulse_slice_slow(*chan, voltage, nanos)?;
+            }
+        }
+
+        Ok(self)
+
+    }
+
 }
 
 
