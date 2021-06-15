@@ -718,12 +718,30 @@ impl Instrument {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
-            self.pulse_slice_fast(chan, voltage, nanos)?;
+            self.pulse_slice_fast(chan, voltage, nanos, None)?;
         } else {
-            self.pulse_slice_slow(chan, voltage, nanos)?;
+            self.pulse_slice_slow(chan, voltage, nanos, None)?;
         }
 
         Ok(self)
+    }
+
+    /// Apply a pulse to all channels with `chan` as the low potential channel.
+    ///
+    /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
+    /// to a row pulse, otherwise it's a column pulse.
+    pub fn pulse_slice_masked(&mut self, chan: usize, mask: &[usize], voltage: f32, nanos: u128) -> Result<&mut Self, String> {
+
+        // use the high speed driver for all pulses faster than 500 ms
+        if nanos < 500_000_000u128 {
+            self.pulse_slice_fast(chan, voltage, nanos, Some(mask))?;
+        } else {
+            self.pulse_slice_slow(chan, voltage, nanos, Some(mask))?;
+        }
+
+        Ok(self)
+
+
     }
 
     /// Setup the biasing channels for multi-channel pulsing. This function will setup
@@ -852,14 +870,20 @@ impl Instrument {
 
     }
 
-    fn pulse_slice_slow(&mut self, chan: usize, voltage: f32, nanos: u128) ->
+    fn pulse_slice_slow(&mut self, chan: usize, voltage: f32, nanos: u128, mask: Option<&[usize]>) ->
         Result<&mut Self, String> {
 
         let mut bias_conf = ChannelConf::new();
-        let bias_channels = if (chan < 16) || ((32 <= chan) && (chan < 48)) {
-            &*ALL_WORDS
-        } else {
-            &*ALL_BITS
+
+        // Check if there are specific channels requested (`mask`). If not
+        // just used all words/bits depending on the low channel number.
+        let bias_channels = match mask {
+            Some(m) => m,
+            None => if (chan < 16) || ((32 <= chan) && (chan < 48)) {
+                &*ALL_WORDS
+            } else {
+                &*ALL_BITS
+            }
         };
 
         let mut channel_pairs: Vec<(usize, usize, f32)> = Vec::with_capacity(32);
@@ -885,14 +909,20 @@ impl Instrument {
         Ok(self)
     }
 
-    fn pulse_slice_fast(&mut self, chan: usize, voltage: f32, nanos: u128) ->
+    fn pulse_slice_fast(&mut self, chan: usize, voltage: f32, nanos: u128, mask: Option<&[usize]>) ->
         Result<&mut Self, String> {
 
         let mut bias_conf = ChannelConf::new();
-        let bias_channels = if (chan < 16) || ((32 <= chan) && (chan < 48)) {
-            &*ALL_WORDS
-        } else {
-            &*ALL_BITS
+
+        // Check if there are specific channels requested (`mask`). If not
+        // just used all words/bits depending on the low channel number.
+        let bias_channels = match mask {
+            Some(m) => m,
+            None => if (chan < 16) || ((32 <= chan) && (chan < 48)) {
+                &*ALL_WORDS
+            } else {
+                &*ALL_BITS
+            }
         };
 
         // (low/high) pulsing pairs
@@ -981,12 +1011,12 @@ impl Instrument {
 
         if nanos < 500_000_000u128 {
             for chan in bias_channels {
-               self.pulse_slice_fast(*chan, voltage, nanos)?;
+               self.pulse_slice_fast(*chan, voltage, nanos, None)?;
             }
 
         } else {
             for chan in bias_channels {
-               self.pulse_slice_slow(*chan, voltage, nanos)?;
+               self.pulse_slice_slow(*chan, voltage, nanos, None)?;
             }
         }
 
