@@ -310,6 +310,12 @@ impl Instrument {
                         Ok(()) => {
                             thread::sleep(WRITEDELAY);
                             buf.clear();
+
+                            {
+                                #[cfg(feature="debug_packets")]
+                                eprintln!("FLUSH");
+                            }
+
                             Ok(self)
                         },
                         Err(err) => Err(format!("Could not write buffer: {}", err))
