@@ -872,6 +872,7 @@ impl Instrument {
 
         let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
         self.process(pulse.compile())?;
+        self.add_delay(nanos)?;
         self.ground_all()
 
     }
@@ -999,6 +1000,7 @@ impl Instrument {
 
         let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
         self.process(pulse.compile())?;
+        self.add_delay(nanos)?;
         self.ground_all()?;
 
         Ok(self)
