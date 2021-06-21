@@ -384,10 +384,12 @@ impl Instrument {
     }
 
     pub fn ground_all(&mut self) -> Result<&mut Self, String> {
-        self.process(&*CHAN_ARB_ALL)?;
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
-        self.add_delay(10_000u128)
+        self.add_delay(20_000u128)?;
+        self.process(&*CHAN_ARB_ALL)?;
+
+        Ok(self)
     }
 
     /// Set global 3.3 V logic level
