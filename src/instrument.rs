@@ -54,6 +54,15 @@ lazy_static! {
         instr
     };
 
+    static ref PREP_AMP_ALL: AmpPrep = {
+        let mut mask = ChanMask::new();
+        mask.set_enabled_all(true);
+        let mut instr = AmpPrep::new(&mask);
+
+        instr.compile();
+        instr
+    };
+
     static ref ALL_WORDS: Vec<usize> = {
         let mut channels: Vec<usize> = Vec::with_capacity(32);
         channels.append(&mut (16usize..32).collect::<Vec<usize>>());
@@ -387,6 +396,8 @@ impl Instrument {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(20_000u128)?;
+        self.process(&*PREP_AMP_ALL)?;
+        self.add_delay(100_000u128)?;
         self.process(&*CHAN_ARB_ALL)?;
 
         Ok(self)
