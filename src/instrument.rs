@@ -4,7 +4,7 @@ use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
 
 use crate::instructions::*;
-use crate::registers::{ChannelState, ADCMask};
+use crate::registers::{ChannelState, ChanMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
 use crate::registers::consts::HSCLUSTERMAP;
 use crate::memory::{MemMan, Chunk};
@@ -432,7 +432,7 @@ impl Instrument {
         self.process(ioconf.compile())?;
 
         // Prepare the ADC mask for the readout
-        let mut adcmask = ADCMask::new();
+        let mut adcmask = ChanMask::new();
 
         for chan in highs {
             adcmask.set_enabled(*chan, true);

@@ -1434,20 +1434,20 @@ impl U32Mask<wordreg::Wx4> {
 }
 
 
-/// Measurement channel configuration bitmask.
+/// Channel configuration bitmask.
 ///
-/// An `ADCMask` is used to configure the measurement channels. Essentially
-/// it defines which channels the Read Current or Read Voltage operation be
-/// applied.
+/// An `ChanMask` is used to select one or more channels. Essentially
+/// it defines which channels the Read Current, Read Voltage or Amp Prep
+/// operations be applied to.
 ///
 /// See [`U32Mask`][`crate::registers::U32Mask`] for details and
 /// methods.
 ///
 /// ## Example
 /// ```
-/// use libarc2::registers::{ADCMask, ToU32s};
+/// use libarc2::registers::{ChanMask, ToU32s};
 ///
-/// let mut chan = ADCMask::new();
+/// let mut chan = ChanMask::new();
 ///
 /// // set some channels
 /// chan.set_enabled(31, true);
@@ -1459,7 +1459,7 @@ impl U32Mask<wordreg::Wx4> {
 /// // u32 representation
 /// assert_eq!(chan.as_u32s(), &[0x40000000, 0x80000001]);
 /// ```
-pub type ADCMask = U32Mask<wordreg::Wx2>;
+pub type ChanMask = U32Mask<wordreg::Wx2>;
 
 /// Averaging for read operations
 #[derive(Clone, Copy, FromPrimitive, ToPrimitive, Debug)]
@@ -1478,12 +1478,12 @@ impl ToU32s for Averaging {
 
 #[cfg(test)]
 mod adcmask_tests {
-    use super::ADCMask;
+    use super::ChanMask;
     use crate::registers::ToU32s;
 
     #[test]
     fn get_set_channel() {
-        let mut v = ADCMask::new();
+        let mut v = ChanMask::new();
         v.set_enabled(31, true);
         v.set_enabled(0, true);
         v.set_enabled(62, true);
@@ -1499,7 +1499,7 @@ mod adcmask_tests {
 
     #[test]
     fn get_set_all_channels() {
-        let mut v = ADCMask::new();
+        let mut v = ChanMask::new();
         v.set_enabled_all(true);
 
         for c in 0..v.len() {
@@ -1510,7 +1510,7 @@ mod adcmask_tests {
 
     #[test]
     fn repr() {
-        let mut v = ADCMask::new();
+        let mut v = ChanMask::new();
         v.set_enabled(31, true);
         v.set_enabled(0, true);
         v.set_enabled(62, true);
@@ -1521,7 +1521,7 @@ mod adcmask_tests {
 
     #[test]
     fn toggle() {
-        let mut v = ADCMask::new();
+        let mut v = ChanMask::new();
         v.set_enabled(31, true);
         v.set_enabled(0, true);
         v.set_enabled(62, true);

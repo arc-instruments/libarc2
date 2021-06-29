@@ -1,3 +1,4 @@
+#![doc(html_logo_url = "../arci.svg")]
 #[macro_use]
 extern crate lazy_static;
 

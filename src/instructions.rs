@@ -5,7 +5,7 @@ use crate::registers::ToU32s;
 use crate::registers::Terminate;
 use crate::registers::{OpCode, Empty, DACMask, DACVoltage};
 use crate::registers::{ChannelConf, SourceConf, ChannelState};
-use crate::registers::{IOEnable, IOMask, ADCMask, Averaging};
+use crate::registers::{IOEnable, IOMask, ChanMask, Averaging};
 use crate::registers::{Duration50, Address, HSDelay, DACCluster};
 use crate::registers::{ClusterMask, PulseAttrs};
 use num_traits::FromPrimitive;
@@ -718,26 +718,26 @@ impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
 /// Perform a current read operation on selected channels.
 ///
 /// This will create a new current read operation on selected channels.
-/// See documentation on [`ADCMask`][`crate::registers::ADCMask`] on how
+/// See documentation on [`ChanMask`][`crate::registers::ChanMask`] on how
 /// to select one or more input channels.
 ///
 /// ## Instruction layout
 ///
 /// ```text
-///        +--------+---------+---------+
-///        | OpCode | ADCMask | Address |
-///        +--------+---------+---------+
+///        +--------+----------+---------+
+///        | OpCode | ChanMask | Address |
+///        +--------+----------+---------+
 /// Words:     1         2         1
 /// ```
 ///
 /// ## Example
 ///
 /// ```
-/// use libarc2::registers::{ADCMask, Address};
+/// use libarc2::registers::{ChanMask, Address};
 /// use libarc2::instructions::{CurrentRead, Instruction};
 ///
 /// // Select channels 31, 0, 62
-/// let mut mask = ADCMask::new();
+/// let mut mask = ChanMask::new();
 /// mask.set_enabled(31, true);
 /// mask.set_enabled(0, true);
 /// mask.set_enabled(62, true);
@@ -754,7 +754,7 @@ pub struct CurrentRead {
 impl CurrentRead {
 
     /// Create a new current read instruction
-    pub fn new(channels: &ADCMask, addr: u32) -> Self {
+    pub fn new(channels: &ChanMask, addr: u32) -> Self {
         let mut instr = Self::create();
         instr.push_register(&OpCode::CurrentRead);
         instr.push_register(channels);
@@ -770,14 +770,14 @@ impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
 /// Perform a voltage read operation on selected channels.
 ///
 /// This will create a new voltage read operation on selected channels.
-/// See documentation on [`ADCMask`][`crate::registers::ADCMask`] on how
+/// See documentation on [`ChanMask`][`crate::registers::ChanMask`] on how
 /// to select one or more input channels.
 ///
 /// ## Instruction layout
 ///
 /// ```text
 ///        +--------+---------+-----------+---------+
-///        | OpCode | ADCMask | Averaging | Address |
+///        | OpCode | ChanMask | Averaging | Address |
 ///        +--------+---------+-----------+---------+
 /// Words:     1         2          1          1
 /// ```
@@ -785,11 +785,11 @@ impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
 /// ## Example
 ///
 /// ```
-/// use libarc2::registers::{ADCMask, Address};
+/// use libarc2::registers::{ChanMask, Address};
 /// use libarc2::instructions::{VoltageRead, Instruction};
 ///
 /// // Select channels 31, 0, 62
-/// let mut mask = ADCMask::new();
+/// let mut mask = ChanMask::new();
 /// mask.set_enabled(31, true);
 /// mask.set_enabled(0, true);
 /// mask.set_enabled(62, true);
@@ -806,7 +806,7 @@ pub struct VoltageRead {
 impl VoltageRead {
 
     /// Create a new voltage read instruction
-    pub fn new(channels: &ADCMask, averaging: bool, addr: u32) -> Self {
+    pub fn new(channels: &ChanMask, averaging: bool, addr: u32) -> Self {
         let mut instr = Self::create();
         instr.push_register(&OpCode::VoltageRead);
         instr.push_register(channels);
@@ -1243,7 +1243,7 @@ mod tests {
     #[test]
     fn new_current_read() {
 
-        let mut mask = ADCMask::new();
+        let mut mask = ChanMask::new();
         mask.set_enabled(31, true);
         mask.set_enabled(0, true);
         mask.set_enabled(62, true);
@@ -1269,7 +1269,7 @@ mod tests {
     #[test]
     fn new_voltage_read() {
 
-        let mut mask = ADCMask::new();
+        let mut mask = ChanMask::new();
         mask.set_enabled(31, true);
         mask.set_enabled(0, true);
         mask.set_enabled(62, true);
