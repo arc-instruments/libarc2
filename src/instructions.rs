@@ -997,6 +997,53 @@ impl HSPulse {
 impl Instruction for HSPulse { make_vec_instr_impl!(HSPulse, instrs); }
 
 
+/// Connect feedback resistors to the op-amps
+///
+/// This command is used to connect the feedback resistors to the op-amps
+/// in a controlled manner to avoid voltage transients on the channel. It
+/// should be used before setting a channel as arbitrary voltage or when
+/// commanding a current/voltage read.
+///
+/// ## Instruction layout
+///
+/// ```text
+///        +--------+----------+
+///        | OpCode | ChanMask |
+///        +--------+----------+
+/// Words:     1         2
+/// ```
+pub struct AmpPrep {
+    instrs: Vec<u32>
+}
+
+impl AmpPrep {
+
+    /// Create a new opamp prepare instruction
+    pub fn new(channels: &ChanMask) -> Self {
+        let mut instr = Self::create();
+        instr.push_register(&OpCode::AmpPrep);
+        instr.push_register(channels);
+        instr
+    }
+
+    /// Create a new opamp prepare instruction for the specified
+    /// slice of channels
+    pub fn new_from_channels(channels: &[usize]) -> Self {
+        let mut instr = Self::create();
+        let mut mask = ChanMask::new();
+        for c in channels {
+            mask.set_enabled(*c, true);
+        }
+        instr.push_register(&OpCode::AmpPrep);
+        instr.push_register(&mask);
+
+        instr
+    }
+
+}
+
+impl Instruction for AmpPrep { make_vec_instr_impl!(AmpPrep, instrs); }
+
 /// Reset hardware to default state
 ///
 /// This instruction resets all output DACs to 0.0 and disables I/O channels

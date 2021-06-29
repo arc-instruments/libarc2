@@ -148,7 +148,9 @@ pub enum OpCode {
     /// Set DAC Offsets (currently nop).
     SetDACOffset   = 0x00001000,
     /// Delay (20 ns precision)
-    Delay          = 0x00002000
+    Delay          = 0x00002000,
+    /// OpAmp preparation
+    AmpPrep        = 0x00010000
 }
 
 impl ToU32s for OpCode {
