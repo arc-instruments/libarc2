@@ -438,10 +438,6 @@ impl Instrument {
             UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
         self.process(channelconf.compile())?;
 
-        // set all channel to output
-        let mut ioconf = UpdateLogic::new(true, true);
-        self.process(ioconf.compile())?;
-
         // Prepare the ADC mask for the readout
         let mut adcmask = ChanMask::new();
 
