@@ -121,6 +121,19 @@ pub enum BiasOrder {
     Rows
 }
 
+/// Daughterboard mode of operation
+///
+/// This enum is used to communicate how devices are controlled when a
+/// daughterboard is connected. In the case of the 32NAA daughterboard
+/// when devices are inserted directly into the PLCC socket, control mode
+/// should be `Internal`. If device connections are broken out from the
+/// header then control mode should be `Header`. This affects the way the
+/// I/O logic is configured internally.
+#[derive(Clone)]
+pub enum ControlMode {
+    Header,
+    Internal
+}
 
 /// ArC2 entry level object
 ///
@@ -1039,6 +1052,23 @@ impl Instrument {
 
         Ok(self)
 
+    }
+
+    /// Set control mode for daughterboards
+    ///
+    /// This can be set either to internal or header-controlled. For the 32NAA daughterboard
+    /// the first scenario routes channels to the internal PLCC socket and the second to
+    /// the on-board headers.
+    pub fn set_control_mode(&mut self, mode: ControlMode) -> Result<&mut Self, String> {
+
+        let mut iologic = match mode {
+            ControlMode::Internal => UpdateLogic::new(false, true),
+            ControlMode::Header => UpdateLogic::new(true, true)
+        };
+
+        self.process(iologic.compile())?;
+
+        Ok(self)
     }
 
 }
