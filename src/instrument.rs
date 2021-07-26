@@ -318,6 +318,25 @@ impl Instrument {
         Ok(())
     }
 
+    /// Zero an FPGA address chunk
+    #[cfg(feature="zero_before_write")]
+    fn _zero_chunk(&mut self, chunk: &Chunk) -> Result<(), String> {
+        let mut zerobuf: [u8; INBUF] = [0u8; INBUF];
+        let addr = chunk.addr();
+
+        eprintln!("Trying to zero chunk");
+        match self.efm.write_block(addr, &mut zerobuf, BLFLAGS_W) {
+            Ok(()) => {
+
+                #[cfg(feature="debug_packets")]
+                eprintln!("ZERO: {:08x} → {:08x}", addr, (addr as usize)+INBUF-1);
+
+                Ok(())
+            },
+            Err(err) => Err(format!("Error: {}; Could not zero address range {}", err, addr))
+        }
+    }
+
     /// Write all retained instructions to ArC2. Has no effect if
     /// `retained_mode` is `false` since all instructions are
     /// executed as they are issued.
@@ -459,6 +478,13 @@ impl Instrument {
         }
 
         let chunk = self.memman.alloc_chunk().unwrap();
+
+        #[cfg(feature="zero_before_write")]
+        match self._zero_chunk(&chunk) {
+            Ok(()) => {},
+            Err(err) => { eprintln!("Zeroing chunk at {} failed: {}", chunk.addr(), err) }
+        };
+
         let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
         self.process(currentread.compile())?;
         self.add_delay(1_000u128)?;
