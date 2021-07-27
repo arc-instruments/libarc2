@@ -1,5 +1,6 @@
 use std::{time, thread};
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
 
@@ -146,7 +147,7 @@ pub enum ControlMode {
 pub struct Instrument {
     efm: bl::Device,
     instr_buffer: Option<Vec<u8>>,
-    memman: MemMan,
+    memman: Arc<Mutex<MemMan>>,
 }
 
 /// Find available device IDs.
@@ -247,7 +248,7 @@ impl Instrument {
             Ok(d) => Ok(Instrument {
                 efm: d,
                 instr_buffer: buffer,
-                memman: MemMan::new()
+                memman: Arc::new(Mutex::new(MemMan::new()))
             }),
             Err(err) => Err(format!("Could not open device: {}", err))
         }
@@ -477,7 +478,9 @@ impl Instrument {
             adcmask.set_enabled(*chan, true);
         }
 
-        let chunk = self.memman.alloc_chunk().unwrap();
+        let memman = self.memman.clone();
+        let mut manager = memman.lock().unwrap();
+        let chunk = manager.alloc_chunk().unwrap();
 
         #[cfg(feature="zero_before_write")]
         match self._zero_chunk(&chunk) {
@@ -515,7 +518,8 @@ impl Instrument {
             data[4*high+2], data[4*high+3]]);
 
         // Free up the FPGA chunk for reuse
-        match self.memman.free_chunk(&mut chunk) {
+        let mut manager = self.memman.lock().unwrap();
+        match manager.free_chunk(&mut chunk) {
             Ok(()) => {},
             Err(_) => { return Err("Could not free up memory!!".to_string()); }
         }
@@ -575,7 +579,8 @@ impl Instrument {
         }
 
         // Free up the FPGA chunk for reuse
-        match self.memman.free_chunk(&mut chunk) {
+        let mut manager = self.memman.lock().unwrap();
+        match manager.free_chunk(&mut chunk) {
             Ok(()) => {},
             Err(_) => { return Err("Could not free up memory!!".to_string()); }
         }
@@ -645,7 +650,8 @@ impl Instrument {
         }
 
         // Free up the FPGA chunk for reuse
-        match self.memman.free_chunk(&mut chunk) {
+        let mut manager = self.memman.lock().unwrap();
+        match manager.free_chunk(&mut chunk) {
             Ok(()) => {},
             Err(_) => { return Err("Could not free up memory!!".to_string()); }
         }

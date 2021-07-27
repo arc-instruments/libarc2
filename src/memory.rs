@@ -21,6 +21,15 @@ impl std::fmt::Display for MemoryError {
     }
 }
 
+impl std::convert::From<MemoryError> for &str {
+    fn from(error: MemoryError) -> Self {
+        match error {
+            MemoryError::ENOMEM => "Out of memory",
+            MemoryError::EDFREE => "Double free",
+        }
+    }
+}
+
 impl std::error::Error for MemoryError {}
 
 
