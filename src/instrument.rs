@@ -64,6 +64,12 @@ lazy_static! {
         instr
     };
 
+    static ref ZERO_HS_TIMINGS: HSConfig = {
+        let mut instr = HSConfig::new([0u32; 8]);
+        instr.compile();
+        instr
+    };
+
     static ref ALL_WORDS: Vec<usize> = {
         let mut channels: Vec<usize> = Vec::with_capacity(32);
         channels.append(&mut (16usize..32).collect::<Vec<usize>>());
@@ -822,13 +828,15 @@ impl Instrument {
     }
 
     /// Apply a pulse between the specified channels. A voltage of `-voltage/2` will be
-    /// applied to the `low` channel `voltage/2` to the `high` channel.
-    pub fn pulse_one(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
+    /// applied to the `low` channel `voltage/2` to the `high` channel. When `preset_state`
+    /// is true the state of high speed drivers will be initialised before the actual pulsing
+    /// sequence begins.
+    pub fn pulse_one(&mut self, low: usize, high: usize, voltage: f32, nanos: u128, preset_state: bool)
         -> Result<&mut Self, String> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
-            self.pulse_one_fast(low, high, voltage, nanos)?;
+            self.pulse_one_fast(low, high, voltage, nanos, preset_state)?;
         } else {
             self.pulse_one_slow(low, high, voltage, nanos)?;
         }
@@ -839,12 +847,14 @@ impl Instrument {
     /// Apply a pulse to all channels with `chan` as the low potential channel.
     ///
     /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
-    /// to a row pulse, otherwise it's a column pulse.
-    pub fn pulse_slice(&mut self, chan: usize, voltage: f32, nanos: u128) -> Result<&mut Self, String> {
+    /// to a row pulse, otherwise it's a column pulse. When `preset_state`
+    /// is true the state of high speed drivers will be initialised before the actual pulsing
+    /// sequence begins.
+    pub fn pulse_slice(&mut self, chan: usize, voltage: f32, nanos: u128, preset_state: bool) -> Result<&mut Self, String> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
-            self.pulse_slice_fast(chan, voltage, nanos, None)?;
+            self.pulse_slice_fast(chan, voltage, nanos, None, preset_state)?;
         } else {
             self.pulse_slice_slow(chan, voltage, nanos, None)?;
         }
@@ -855,12 +865,14 @@ impl Instrument {
     /// Apply a pulse to all channels with `chan` as the low potential channel.
     ///
     /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
-    /// to a row pulse, otherwise it's a column pulse.
-    pub fn pulse_slice_masked(&mut self, chan: usize, mask: &[usize], voltage: f32, nanos: u128) -> Result<&mut Self, String> {
+    /// to a row pulse, otherwise it's a column pulse. When `preset_state`
+    /// is true the state of high speed drivers will be initialised before the actual pulsing
+    /// sequence begins.
+    pub fn pulse_slice_masked(&mut self, chan: usize, mask: &[usize], voltage: f32, nanos: u128, preset_state: bool) -> Result<&mut Self, String> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
-            self.pulse_slice_fast(chan, voltage, nanos, Some(mask))?;
+            self.pulse_slice_fast(chan, voltage, nanos, Some(mask), preset_state)?;
         } else {
             self.pulse_slice_slow(chan, voltage, nanos, Some(mask))?;
         }
@@ -950,7 +962,7 @@ impl Instrument {
 
     /// Pulse a crosspoint using the high speed drivers. This function will *NOT*
     /// automatically flush output.
-    fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
+    fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128, preset_state: bool)
         -> Result<&mut Self, String> {
 
         // set high and low channels as HS drivers
@@ -959,11 +971,6 @@ impl Instrument {
         bias_conf.set(low, ChannelState::HiSpeed);
 
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
-        self.process(conf.compile())?;
-
-        // setup a high-speed differential pulsing scheme
-        self._setup_dacs_for_pulsing(&[(low, high, voltage)], true, true)?;
-        self.add_delay(20_000u128)?;
 
         let mut timings: [u32; 8] = [0u32; 8];
         // Obviously these will clip if nanos > u32::MAX
@@ -976,7 +983,6 @@ impl Instrument {
         timings[cl_high] = nanos as u32;
 
         let mut hsconf = HSConfig::new(timings);
-        self.process(hsconf.compile())?;
 
         let hs_clusters = ClusterMask::new_from_cluster_idx(&[cl_low as u8, cl_high as u8]);
         let inv_clusters = if voltage > 0.0 {
@@ -991,8 +997,23 @@ impl Instrument {
         let pulse_attrs = PulseAttrs::new_with_params(hs_clusters,
             inv_clusters, cncl_clusters);
 
-        let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
-        self.process(pulse.compile())?;
+        let mut pulse_base = HSPulse::new_from_attrs(&pulse_attrs);
+        let pulse = pulse_base.compile();
+
+        if preset_state {
+            self.process(&*ZERO_HS_TIMINGS)?;
+            self.process(pulse)?;
+        }
+
+        // set channels as HS
+        self.process(conf.compile())?;
+        // setup a high-speed differential pulsing scheme
+        self._setup_dacs_for_pulsing(&[(low, high, voltage)], true, true)?;
+        self.add_delay(20_000u128)?;
+        // HS configuration
+        self.process(hsconf.compile())?;
+        // HS Pulse
+        self.process(pulse)?;
         self.add_delay(nanos)?;
 
         Ok(self)
@@ -1037,7 +1058,7 @@ impl Instrument {
         Ok(self)
     }
 
-    fn pulse_slice_fast(&mut self, chan: usize, voltage: f32, nanos: u128, mask: Option<&[usize]>) ->
+    fn pulse_slice_fast(&mut self, chan: usize, voltage: f32, nanos: u128, mask: Option<&[usize]>, preset_state:bool) ->
         Result<&mut Self, String> {
 
         let mut bias_conf = ChannelConf::new();
@@ -1104,8 +1125,22 @@ impl Instrument {
         }
 
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
-        self.process(conf.compile())?;
 
+
+        let mut hsconf = HSConfig::new(timings);
+
+        let pulse_attrs = PulseAttrs::new_with_params(hs_clusters,
+            inv_clusters, cncl_clusters);
+
+        let mut pulse_base = HSPulse::new_from_attrs(&pulse_attrs);
+        let pulse = pulse_base.compile();
+
+        if preset_state {
+            self.process(&*ZERO_HS_TIMINGS)?;
+            self.process(pulse)?;
+        }
+
+        self.process(conf.compile())?;
         // setup a high speed differential pulsing scheme
         // WARNING! If a non-differential pulse (last argument is `false`)
         // is used instead `timings` for high channels above should be
@@ -1113,13 +1148,7 @@ impl Instrument {
         self._setup_dacs_for_pulsing(&channel_pairs, true, true)?;
         self.add_delay(20_000u128)?;
 
-        let mut hsconf = HSConfig::new(timings);
         self.process(hsconf.compile())?;
-
-        let pulse_attrs = PulseAttrs::new_with_params(hs_clusters,
-            inv_clusters, cncl_clusters);
-
-        let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
         self.process(pulse.compile())?;
         self.add_delay(nanos)?;
 
@@ -1130,7 +1159,7 @@ impl Instrument {
     ///
     /// This function will pulse available crosspoints on the array. This can be done
     /// either by high biasing the rows ([`BiasOrder::Rows`]) or columns ([`BiasOrder::Columns`]).
-    pub fn pulse_all(&mut self, voltage: f32, nanos: u128, order: BiasOrder) -> Result<&mut Self, String> {
+    pub fn pulse_all(&mut self, voltage: f32, nanos: u128, order: BiasOrder, preset_state: bool) -> Result<&mut Self, String> {
 
         let bias_channels = match order {
             BiasOrder::Rows => &*ALL_WORDS,
@@ -1139,7 +1168,7 @@ impl Instrument {
 
         if nanos < 500_000_000u128 {
             for chan in bias_channels {
-               self.pulse_slice_fast(*chan, voltage, nanos, None)?;
+               self.pulse_slice_fast(*chan, voltage, nanos, None, preset_state)?;
             }
 
         } else {
