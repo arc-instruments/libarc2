@@ -448,6 +448,86 @@ impl Instrument {
         Ok(self)
     }
 
+    /// Retrieve all channel currents from specific address segment. This function will
+    /// always return a 64-element vector. Non-selected channels will be replaced by
+    /// f32::NAN. The function will panic if a channel number exceeding the highest
+    /// channel (presently 63) is provided or if an invalid base address is selected.
+    /// Base address must be a multiple of 256.
+    pub fn currents_from_address(&self, addr: u32, chans: &[usize]) -> Result<Vec<f32>, String> {
+
+        if addr % 256 != 0 {
+            panic!("Attempted to read currents from invalid base address");
+        }
+
+        let data = self.read_raw(addr)?;
+        let mut result: Vec<f32> = vec![f32::NAN; 64];
+
+        // Assemble the number from the 4 neighbouring bytes
+        for chan in chans {
+            let val: u32 = u32::from_le_bytes([data[4*chan+0], data[4*chan+1],
+                data[4*chan+2], data[4*chan+3]]);
+
+            if chan % 2 == 0 {
+                result[*chan] = _adc_to_current(val);
+            } else {
+                result[*chan] = -1.0*_adc_to_current(val);
+            }
+        }
+
+        Ok(result)
+
+    }
+
+    /// Retrieve all wordline currents from specific address segment. This function will
+    /// always return a 32-element vector. The function will panic if an invalid base
+    /// address is provided. Base address must be a multiple of 256.
+    pub fn word_currents_from_address(&self, addr: u32) -> Result<Vec<f32>, String> {
+
+        if addr % 256 != 0 {
+            panic!("Attempted to read currents from invalid base address");
+        }
+
+        let data = self.read_raw(addr)?;
+        let mut result: Vec<f32> = Vec::with_capacity(32);
+
+        for chan in &*ALL_WORDS {
+            let val: u32 = u32::from_le_bytes([data[4*chan+0], data[4*chan+1],
+                data[4*chan+2], data[4*chan+3]]);
+
+            if chan % 2 == 0 {
+                result.push(_adc_to_current(val));
+            } else {
+                result.push(-1.0*_adc_to_current(val));
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Retrieve all bitline currents from specific address segment. This function will
+    /// always return a 32-element vector.
+    pub fn bit_currents_from_address(&self, addr: u32) -> Result<Vec<f32>, String> {
+
+        if addr % 256 != 0 {
+            panic!("Attempted to read currents from invalid base address");
+        }
+
+        let data = self.read_raw(addr)?;
+        let mut result: Vec<f32> = Vec::with_capacity(32);
+
+        for chan in &*ALL_BITS {
+            let val: u32 = u32::from_le_bytes([data[4*chan+0], data[4*chan+1],
+                data[4*chan+2], data[4*chan+3]]);
+
+            if chan % 2 == 0 {
+                result.push(_adc_to_current(val));
+            } else {
+                result.push(-1.0*_adc_to_current(val));
+            }
+        }
+
+        Ok(result)
+    }
 
     /// Common read functionality with one low channel and several high channels.
     /// This function is guaranteed never to flush the output.
@@ -537,42 +617,27 @@ impl Instrument {
         // Reset DAC configuration
         self.reset_dacs()?;
 
-        let channels: &Vec<usize>;
+        let res: Vec<f32>;
+        let mut chunk: Chunk;
 
         // Channels 0..16 and 32..48 correspond to rows
         // so we want to read from all the columns in the
         // row
         if (chan < 16) || ((32 <= chan) && (chan < 48)) {
-            channels = &*ALL_WORDS;
+            // Initiate a read operation get the address of the data to be...
+            chunk = self._read_slice_inner(chan, &*ALL_WORDS, vidx!(-vread))?;
+            // ... and finally withdraw voltage from the biasing channels
+            self.ground_all()?.execute()?;
+            res = self.word_currents_from_address(chunk.addr())?;
         // Or the other way around. Channels 16..32 and
         // 48..64 correspond to columns so we want to read
         // from all the rows in the column.
         } else {
-            channels = &*ALL_BITS;
-        }
-
-        // Initiate a read operation get the address of the data to be...
-        let mut chunk = self._read_slice_inner(chan, &channels, vidx!(-vread))?;
-
-        // ... and finally withdraw voltage from the biasing channels
-        self.ground_all()?.execute()?;
-
-        // Make an array to hold all the values of row/column
-        let mut res: Vec<f32> = Vec::with_capacity(32);
-
-        // Read the raw chunk of data
-        let data = self.read_raw(chunk.addr())?;
-
-        // Convert adc values to current
-        for chan in channels {
-            let raw_value = u32::from_le_bytes([data[4*chan+0],
-                data[4*chan+1], data[4*chan+2], data[4*chan+3]]);
-            let cur = if chan % 2 == 0 {
-                _adc_to_current(raw_value)
-            } else {
-                -1.0*_adc_to_current(raw_value)
-            };
-            res.push(cur);
+            // Initiate a read operation get the address of the data to be...
+            chunk = self._read_slice_inner(chan, &*ALL_BITS, vidx!(-vread))?;
+            // ... and finally withdraw voltage from the biasing channels
+            self.ground_all()?.execute()?;
+            res = self.bit_currents_from_address(chunk.addr())?;
         }
 
         // Free up the FPGA chunk for reuse
