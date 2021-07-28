@@ -30,6 +30,13 @@ impl std::convert::From<MemoryError> for &str {
     }
 }
 
+impl std::convert::From<MemoryError> for String {
+    fn from(error: MemoryError) -> Self {
+        let foo: &str = error.into();
+        foo.to_string()
+    }
+}
+
 impl std::error::Error for MemoryError {}
 
 

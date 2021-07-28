@@ -519,10 +519,7 @@ impl Instrument {
 
         // Free up the FPGA chunk for reuse
         let mut manager = self.memman.lock().unwrap();
-        match manager.free_chunk(&mut chunk) {
-            Ok(()) => {},
-            Err(_) => { return Err("Could not free up memory!!".to_string()); }
-        }
+        manager.free_chunk(&mut chunk)?;
 
         if high % 2 == 0 {
             Ok(_adc_to_current(val))
@@ -580,10 +577,7 @@ impl Instrument {
 
         // Free up the FPGA chunk for reuse
         let mut manager = self.memman.lock().unwrap();
-        match manager.free_chunk(&mut chunk) {
-            Ok(()) => {},
-            Err(_) => { return Err("Could not free up memory!!".to_string()); }
-        }
+        manager.free_chunk(&mut chunk)?;
 
         Ok(res)
     }
@@ -651,10 +645,7 @@ impl Instrument {
 
         // Free up the FPGA chunk for reuse
         let mut manager = self.memman.lock().unwrap();
-        match manager.free_chunk(&mut chunk) {
-            Ok(()) => {},
-            Err(_) => { return Err("Could not free up memory!!".to_string()); }
-        }
+        manager.free_chunk(&mut chunk)?;
 
         Ok(res)
     }
