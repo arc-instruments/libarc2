@@ -425,6 +425,7 @@ impl Instrument {
         Ok(self)
     }
 
+    /// Ground all channels reverting them to VoltArb
     pub fn ground_all(&mut self) -> Result<&mut Self, String> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
@@ -432,6 +433,15 @@ impl Instrument {
         self.process(&*PREP_AMP_ALL)?;
         self.add_delay(100_000u128)?;
         self.process(&*CHAN_ARB_ALL)?;
+
+        Ok(self)
+    }
+
+    /// Set all DACs to ground maintaining current channel state
+    pub fn ground_all_fast(&mut self) -> Result<&mut Self, String> {
+        self.process(&*RESET_DAC)?;
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(20_000u128)?;
 
         Ok(self)
     }
