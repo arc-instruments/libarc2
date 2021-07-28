@@ -868,7 +868,8 @@ impl Instrument {
         // setup a non-high speed differential pulsing scheme
         self._setup_dacs_for_pulsing(&[(low, high, voltage)], false, true)?;
         self.add_delay(nanos+20_000u128)?;
-        self.ground_all()
+
+        Ok(self)
 
     }
 
@@ -918,7 +919,8 @@ impl Instrument {
         let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
         self.process(pulse.compile())?;
         self.add_delay(nanos)?;
-        self.ground_all()
+
+        Ok(self)
 
     }
 
@@ -956,7 +958,6 @@ impl Instrument {
         // setup a non-high speed differential pulsing scheme
         self._setup_dacs_for_pulsing(&channel_pairs, false, true)?;
         self.add_delay(nanos+20_000u128)?;
-        self.ground_all()?;
 
         Ok(self)
     }
@@ -1046,7 +1047,6 @@ impl Instrument {
         let mut pulse = HSPulse::new_from_attrs(&pulse_attrs);
         self.process(pulse.compile())?;
         self.add_delay(nanos)?;
-        self.ground_all()?;
 
         Ok(self)
     }
