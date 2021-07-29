@@ -1181,6 +1181,216 @@ impl Instrument {
 
     }
 
+    /// Pulse and immediately read a crosspoint. Semantics and arguments follow the same
+    /// conventions as [`Instrument::read_one`] and [`Instrument::pulse_one'].
+    pub fn pulseread_one(&mut self, low: usize, high: usize, vpulse: f32, nanos: u128,
+        vread: f32) -> Result<f32, String> {
+
+        if nanos < 500_000_000u128 {
+            // For fast pulse+read we need to use the fast variant of grounding which
+            // essentially removes the bias without reverting to VoltArb. This is
+            // immediately followed by the generic inner read method (which will
+            // revert the channels to VoltArb eventually). Then the crosspoints
+            // are grounded to finalise the operation.
+            //
+            // Presently there is no way to do pulse + read without reverting to
+            // VoltArb and waiting for the ~120 us that comes with the AMP PRP
+            // operation. This is a hardware limitation for the current revision
+            // of the board. So pulse trains of pulse+read operations will never
+            // be truly accurate as there will be a gap between the application
+            // of the pulse and the readout operation. The only true way to do
+            // pulse trains is by forgoing the intermediate reads (or read after
+            // a batch of pulses). The way pulseread is structured is optimised
+            // with this work case in mind.
+            let mut chunk = self.pulse_one_fast(low, high, vpulse, nanos, true)?
+                                .ground_all_fast()?
+                                ._read_slice_inner(low, &[high], vidx!(-vread))?;
+            self.ground_all()?
+                .execute()?;
+
+            let data = self.read_raw(chunk.addr())?;
+            let val = u32::from_le_bytes([data[4*high+0], data[4*high+1], data[4*high+2],
+                data[4*high+3]]);
+
+            let mut manager = self.memman.lock().unwrap();
+            manager.free_chunk(&mut chunk)?;
+
+            if high % 2 == 0 {
+                Ok(_adc_to_current(val))
+            } else {
+                Ok(-1.0*_adc_to_current(val))
+            }
+        } else {
+            // For the slow path the delays included are 3 order of magnitude
+            // smaller than the indented pulse width so we're just doing a
+            // regular pulse followed by a regular ground and a regular read.
+            // At worst we'll lose 120 us in > 500 ms pulse; peanuts!
+            self.pulse_one_slow(low, high, vpulse, nanos)?
+                .ground_all()?;
+            self.read_one(low, high, vread)
+        }
+
+    }
+
+    /// Pulse and read a slice. Semantics and arguments follow the same conventions as
+    /// [`Instrument::read_slice`] and [`Instrument::pulse_slice`];
+    pub fn pulseread_slice(&mut self, chan: usize, vpulse: f32, nanos: u128, vread: f32) -> Result<Vec<f32>, String> {
+        let func: fn(&Instrument, u32) -> Result<Vec<f32>, String>;
+        let channels: &Vec<usize>;
+
+        if (chan < 16) || ((32 <= chan) && (chan < 48)) {
+            channels = &*ALL_WORDS;
+            func = Instrument::word_currents_from_address;
+        } else {
+            channels = &*ALL_BITS;
+            func = Instrument::bit_currents_from_address;
+        }
+
+        if nanos < 500_000_000u128 {
+            let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, None, true)?
+                                .ground_all_fast()?
+                                ._read_slice_inner(chan, channels, vidx!(-vread))?;
+            self.ground_all()?
+                .execute()?;
+            let res = func(&self, chunk.addr());
+
+            let mut manager = self.memman.lock().unwrap();
+            manager.free_chunk(&mut chunk)?;
+
+            res
+        } else {
+            self.pulse_slice_slow(chan, vpulse, nanos, None)?
+                .ground_all()?;
+            self.read_slice(chan, vread)
+        }
+
+    }
+    /// Pulse and read a slice but returning an [`Array`][`ndarray::Array`] for
+    /// numpy compatibility
+    pub fn pulseread_slice_as_ndarray(&mut self, chan: usize, vpulse: f32,
+        nanos: u128, vread: f32) -> Result<Array<f32, Ix1>, String> {
+        let data = self.pulseread_slice(chan, vpulse, nanos, vread)?;
+        Ok(Array::from(data))
+    }
+
+    /// Pulse and immediately read all crosspoints. Semantics and arguments follow the same
+    /// conventions as [`Instrument::read_all`] and [`Instrument::pulse_all'].
+    pub fn pulseread_all(&mut self, vpulse: f32, nanos: u128, vread: f32, order: BiasOrder) -> Result<Vec<f32>, String> {
+        let func: fn(&Instrument, u32) -> Result<Vec<f32>, String>;
+        let channels: &Vec<usize>;
+        let mut result = Vec::with_capacity(32*32);
+
+        match order {
+            BiasOrder::Rows => { channels = &*ALL_WORDS; func = Instrument::word_currents_from_address; },
+            BiasOrder::Columns => { channels = &*ALL_BITS; func = Instrument::bit_currents_from_address; },
+        };
+
+        if nanos < 500_000_000u128 {
+            let chunks: Vec<Chunk> = Vec::with_capacity(32);
+            for chan in channels {
+                let chunk = self.pulse_slice_fast(*chan, vpulse, nanos, None, true)?
+                                .ground_all_fast()?
+                                ._read_slice_inner(*chan, channels, vidx!(-vread))?;
+                self.ground_all()?
+                    .execute()?;
+
+                let mut res = func(&self, chunk.addr())?;
+                result.append(&mut res);
+
+            }
+
+            // read data and release memory back to the pool
+            let mut manager = self.memman.lock().unwrap();
+            for mut chunk in chunks {
+                result.append(&mut func(&self, chunk.addr())?);
+                manager.free_chunk(&mut chunk)?;
+            }
+
+        } else {
+            for chan in channels {
+                self.pulse_slice_slow(*chan, vpulse, nanos, None)?
+                    .ground_all()?;
+                result.append(&mut self.read_slice(*chan, vread)?);
+            }
+        }
+
+        Ok(result)
+
+    }
+
+    /// Pulse and read all crosspoints but returning an [`Array`][`ndarray::Array`]
+    /// for numpy compatibility
+    pub fn pulseread_all_as_ndarray(&mut self, vpulse: f32, nanos: u128,
+        vread: f32, order: BiasOrder) -> Result<Array<f32, Ix2>, String> {
+
+        let data = self.pulseread_all(vpulse, nanos, vread, order)?;
+        Ok(Array::from_shape_vec((32, 32), data).unwrap())
+    }
+
+    /// Pulse and read the specified high channels that have `chan` as the low potential channel.
+    /// Semantics and arguments follow the same conventions as [`Instrument::read_slice_masked`]
+    /// and [`Instrument::pulse_slice_masked`].
+    pub fn pulseread_slice_masked(&mut self, chan: usize, mask: &[usize], vpulse: f32,
+        nanos: u128, vread: f32) -> Result<Vec<f32>, String> {
+
+        let all_channels: &Vec<usize>;
+        let all_channels_set: &HashSet<usize>;
+        let mut res: Vec<f32>;
+
+        if (chan < 16) || ((32 <= chan) && (chan < 48)) {
+            all_channels = &*ALL_WORDS;
+            all_channels_set = &*ALL_WORDS_SET;
+        } else {
+            all_channels = &*ALL_BITS;
+            all_channels_set = &*ALL_BITS_SET;
+        }
+
+        if nanos < 500_000_000u128 {
+            let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, Some(mask), true)?
+                                .ground_all_fast()?
+                                ._read_slice_inner(chan, &mask, vidx!(-vread))?;
+            self.ground_all()?
+                .execute()?;
+
+            res = Vec::with_capacity(32);
+            let data = self.read_raw(chunk.addr())?;
+
+            for chan in all_channels {
+                if all_channels_set.contains(&chan) {
+                    let raw_value = u32::from_le_bytes([data[4*chan+0],
+                        data[4*chan+1], data[4*chan+2], data[4*chan+3]]);
+                    let cur = if chan % 2 == 0 {
+                        _adc_to_current(raw_value)
+                    } else {
+                        -1.0*_adc_to_current(raw_value)
+                    };
+                    res.push(cur);
+                } else {
+                    res.push(f32::NAN);
+                }
+            }
+
+            let mut manager = self.memman.lock().unwrap();
+            manager.free_chunk(&mut chunk)?;
+
+        } else {
+            self.pulse_slice_slow(chan, vpulse, nanos, Some(mask))?
+                .ground_all()?;
+            res = self.read_slice_masked(chan, mask, vread)?;
+        }
+
+        Ok(res)
+
+    }
+
+    /// Pulse and read the specified high channels that have `chan` as the low potential channel,
+    /// returning an ndarray for numpy compatibility
+    pub fn pulseread_slice_masked_as_ndarray(&mut self, chan: usize, mask: &[usize], vpulse: f32,
+        nanos: u128, vread: f32) -> Result<Array<f32, Ix1>, String> {
+        let data = self.pulseread_slice_masked(chan, mask, vpulse, nanos, vread)?;
+        Ok(Array::from(data))
+    }
+
     /// Set control mode for daughterboards
     ///
     /// This can be set either to internal or header-controlled. For the 32NAA daughterboard
