@@ -1149,7 +1149,7 @@ impl Instrument {
         self.add_delay(20_000u128)?;
 
         self.process(hsconf.compile())?;
-        self.process(pulse.compile())?;
+        self.process(pulse)?;
         self.add_delay(nanos)?;
 
         Ok(self)
