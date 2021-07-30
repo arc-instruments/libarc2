@@ -86,6 +86,10 @@ pub trait Instruction {
     /// arc2.process(reset.compile());
     /// ```
     fn compile(&mut self) -> &mut Self {
+        if self.len() == Self::LENGTH {
+            // this instruction is already compiled
+            return self;
+        }
         for _ in 0..(Self::LENGTH-self.len()-1) {
             self.push_register(&Empty::new());
         }
