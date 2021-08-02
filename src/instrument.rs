@@ -443,6 +443,12 @@ impl Instrument {
         Ok(self)
     }
 
+    /// Prepare the DACs for transition to VoltArb
+    fn _amp_prep(&mut self) -> Result<&mut Self, String> {
+        self.process(&*PREP_AMP_ALL)?;
+        self.add_delay(100_000u128)
+    }
+
     /// Set all DACs to ground maintaining current channel state
     pub fn ground_all_fast(&mut self) -> Result<&mut Self, String> {
         self.process(&*RESET_DAC)?;
@@ -1204,8 +1210,9 @@ impl Instrument {
             // with this work case in mind.
             let mut chunk = self.pulse_one_fast(low, high, vpulse, nanos, true)?
                                 .ground_all_fast()?
+                                ._amp_prep()?
                                 ._read_slice_inner(low, &[high], vidx!(-vread))?;
-            self.ground_all()?
+            self.ground_all_fast()? // we are already in VoltArb no need to AmpPrep again
                 .execute()?;
 
             let data = self.read_raw(chunk.addr())?;
@@ -1249,8 +1256,9 @@ impl Instrument {
         if nanos < 500_000_000u128 {
             let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, None, true)?
                                 .ground_all_fast()?
+                                ._amp_prep()?
                                 ._read_slice_inner(chan, channels, vidx!(-vread))?;
-            self.ground_all()?
+            self.ground_all_fast()?
                 .execute()?;
             let res = func(&self, chunk.addr());
 
@@ -1290,8 +1298,9 @@ impl Instrument {
             for chan in channels {
                 let chunk = self.pulse_slice_fast(*chan, vpulse, nanos, None, true)?
                                 .ground_all_fast()?
+                                ._amp_prep()?
                                 ._read_slice_inner(*chan, channels, vidx!(-vread))?;
-                self.ground_all()?
+                self.ground_all_fast()?
                     .execute()?;
 
                 let mut res = func(&self, chunk.addr())?;
@@ -1348,8 +1357,9 @@ impl Instrument {
         if nanos < 500_000_000u128 {
             let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, Some(mask), true)?
                                 .ground_all_fast()?
+                                ._amp_prep()?
                                 ._read_slice_inner(chan, &mask, vidx!(-vread))?;
-            self.ground_all()?
+            self.ground_all_fast()?
                 .execute()?;
 
             res = Vec::with_capacity(32);
