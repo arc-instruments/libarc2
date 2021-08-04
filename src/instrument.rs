@@ -371,6 +371,7 @@ impl Instrument {
                 }
                 #[cfg(feature="dummy_writes")] {
                     eprintln!("DW: {:?}", buf);
+                    buf.clear();
                     Ok(self)
                 }
             },
