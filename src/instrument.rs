@@ -18,6 +18,7 @@ const WRITEDELAY: time::Duration = time::Duration::from_nanos(2_500_000);
 const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
 const INBUF: usize = 64*std::mem::size_of::<u32>();
+const INSTRCAP: usize = 768*9*std::mem::size_of::<u32>();
 
 // We are caching common instructions
 lazy_static! {
@@ -152,7 +153,13 @@ pub enum ControlMode {
 /// explicitly for them to have any effect.
 pub struct Instrument {
     efm: bl::Device,
-    instr_buffer: Option<Vec<u8>>,
+    // We need reference counting here so that we can use the
+    // chunked iterator on `execute`. Since this is a mutating
+    // iteration over the buffer we need to have an exclusive lock
+    // over the buffer. The same could be done with Rc<RefCell<>>
+    // but unfortunately these do not implement Sync and the python
+    // bindings will fail to compile. Hence the use of Arc/Mutex
+    instr_buffer: Option<Arc<Mutex<Vec<u8>>>>,
     memman: Arc<Mutex<MemMan>>,
 }
 
@@ -240,12 +247,12 @@ impl Instrument {
             return Err(format!("No such device id: {}", id));
         }
 
-        let buffer: Option<Vec<u8>>;
+        let buffer: Option<Arc<Mutex<Vec<u8>>>>;
 
-        // If in retained mode preallocate space for 512 instructions.
+        // If in retained mode preallocate space for 10×768 instructions.
         // If not the instruction buffer is not used.
         if retained_mode {
-            buffer = Some(Vec::with_capacity(512*9*std::mem::size_of::<u32>()));
+            buffer = Some(Arc::new(Mutex::new(Vec::with_capacity(10usize*INSTRCAP))));
         } else {
             buffer = None;
         }
@@ -291,21 +298,8 @@ impl Instrument {
         // convert the instruction into raw bytes
         let mut bytes = instr.to_bytevec();
 
-        // If an instruction buffer is used write the bytes to the buffer
-        // instead of directly to the tool.
-        if let Some(buff) = &mut self.instr_buffer {
-
-            // To avoid reallocation of the buffer flush the instruction
-            // buffer if its length would go over capacity when the new
-            // instruction is added.
-            if buff.len() + bytes.len() > buff.capacity() {
-                self.execute()?;
-            }
-        }
-
-        if let Some(buff) = &mut self.instr_buffer {
-            // buffer is guaranteed to be under capacity here
-            buff.extend(bytes);
+        if let Some(buff) = &mut self.instr_buffer.clone() {
+            buff.lock().unwrap().extend(bytes);
             return Ok(());
         }
 
@@ -349,35 +343,57 @@ impl Instrument {
     /// executed as they are issued.
     pub fn execute(&mut self) -> Result<&mut Self, String> {
 
-        // If an instruction buffer is used empty it, otherwise do
-        // nothing as all writes are immediates
-        match self.instr_buffer {
+        match self.instr_buffer.clone() {
             Some(ref mut buf) => {
                 #[cfg(not(feature="dummy_writes"))] {
-                    match self.efm.write_block(BASEADDR, buf, BLFLAGS_W) {
-                        Ok(()) => {
-                            thread::sleep(WRITEDELAY);
-                            buf.clear();
+                    // lock the instruction buffer
+                    let mut actual_buf = buf.lock().unwrap();
 
-                            {
-                                #[cfg(feature="debug_packets")]
-                                eprintln!("FLUSH");
-                            }
+                    // if buffer is smaller than the instruction cap no
+                    // chunking is practically needed (or to put it
+                    // otherwise: there is only one chunk) so there is
+                    // no need to explicitly wait for the FPGA to consume
+                    // the FIFO before writing the next one.
+                    // If that's the case we can quickly break out of the
+                    // loop.
+                    let quick_break = actual_buf.len() < INSTRCAP;
 
-                            Ok(self)
-                        },
-                        Err(err) => Err(format!("Could not write buffer: {}", err))
+                    // split buffer in chunks
+                    for chunk in actual_buf.chunks_mut(INSTRCAP) {
+                        // write the chunk to the FPGA
+                        match self.efm.write_block(BASEADDR, chunk, BLFLAGS_W) {
+                            Ok(()) => {
+
+                                #[cfg(feature="debug_packets")] {
+                                    eprintln!("FLUSH");
+                                }
+
+                                if quick_break {
+                                    break
+                                }
+
+                                // wait until the FPGA instr. buffer is expended
+                                // otherwise new instructions might overwrite older
+                                // ones
+                                self.wait();
+                            },
+                            Err(err) => { return Err(format!("Buffer not written: {};
+                                expect errors", err)); }
+                        }
                     }
+                    thread::sleep(WRITEDELAY);
+                    // empty the buffer
+                    actual_buf.clear();
+                    Ok(self)
                 }
                 #[cfg(feature="dummy_writes")] {
                     eprintln!("DW: {:?}", buf);
-                    buf.clear();
+                    buf.lock().unwrap().clear();
                     Ok(self)
                 }
             },
             None => Ok(self)
         }
-
 
     }
 
