@@ -1440,7 +1440,11 @@ impl Instrument {
 
 impl Drop for Instrument {
     fn drop(&mut self) {
-        self.efm.close().unwrap();
+        if Arc::strong_count(&self.efm) == 1 {
+            let _efm = &*self.efm;
+            let efm = _efm.lock().unwrap();
+            efm.close().unwrap();
+        }
     }
 }
 
