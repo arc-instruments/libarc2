@@ -1,6 +1,8 @@
 use std::{time, thread};
 use std::collections::HashSet;
 use std::sync::{RwLock, Arc, Mutex};
+//use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
 
@@ -155,8 +157,12 @@ pub enum ControlMode {
 /// are written to the tool as soon they are issued. In retained mode
 /// instructions will be gathered into a buffer which **must** be flushed
 /// explicitly for them to have any effect.
+#[derive(Clone)]
 pub struct Instrument {
-    efm: bl::Device,
+
+    // Handle to underlying device
+    efm: Arc<Mutex<bl::Device>>,
+
     // We need reference counting here so that we can use the
     // chunked iterator on `execute`. Since this is a mutating
     // iteration over the buffer we need to have an exclusive lock
@@ -167,6 +173,10 @@ pub struct Instrument {
 
     // Memory management
     memman: Arc<RwLock<MemMan>>,
+
+    // Long operation handling
+    _sender: Sender<Option<Chunk>>,
+    _receiver: Arc<Mutex<Receiver<Option<Chunk>>>>
 }
 
 /// Find available device IDs.
@@ -263,11 +273,15 @@ impl Instrument {
             buffer = None;
         }
 
+        let (sender, receiver) = channel::<Option<Chunk>>();
+
         match bl::Device::open(id) {
             Ok(d) => Ok(Instrument {
-                efm: d,
+                efm: Arc::new(Mutex::new(d)),
                 instr_buffer: buffer,
                 memman: Arc::new(RwLock::new(MemMan::new())),
+                _sender: sender,
+                _receiver: Arc::new(Mutex::new(receiver))
             }),
             Err(err) => Err(format!("Could not open device: {}", err))
         }
@@ -275,7 +289,9 @@ impl Instrument {
 
     /// Load an FPGA bitstream from a file.
     pub fn load_firmware(&self, path: &str) -> Result<(), String> {
-        match self.efm.program_from_file(&path) {
+        let _efm = self.efm.clone();
+        let efm = _efm.lock().unwrap();
+        match efm.program_from_file(&path) {
             Ok(()) => { Ok(()) },
             Err(err) => { Err(format!("Could not program FPGA: {}", err)) }
         }
@@ -310,8 +326,10 @@ impl Instrument {
         }
 
         // Otherwise write directly to ArC2 (immediate)
+        let _efm = self.efm.clone();
+        let efm = _efm.lock().unwrap();
         #[cfg(not(feature="dummy_writes"))]
-        match self.efm.write_block(BASEADDR, &mut bytes, BLFLAGS_W) {
+        match efm.write_block(BASEADDR, &mut bytes, BLFLAGS_W) {
 
             Ok(()) => {
                 thread::sleep(WRITEDELAY);
@@ -364,10 +382,13 @@ impl Instrument {
                     // loop.
                     let quick_break = actual_buf.len() < INSTRCAP;
 
+                    let _efm = self.efm.clone();
+                    let efm = _efm.lock().unwrap();
+
                     // split buffer in chunks
                     for chunk in actual_buf.chunks_mut(INSTRCAP) {
                         // write the chunk to the FPGA
-                        match self.efm.write_block(BASEADDR, chunk, BLFLAGS_W) {
+                        match efm.write_block(BASEADDR, chunk, BLFLAGS_W) {
                             Ok(()) => {
 
                                 #[cfg(feature="debug_packets")] {
@@ -434,7 +455,10 @@ impl Instrument {
 
     /// Read raw data from block memory
     pub fn read_raw(&self, addr: u32) -> Result<Vec<u8>, String> {
-        match self.efm.read_block(addr, INBUF as i32, BLFLAGS_R) {
+        let _efm = self.efm.clone();
+        let efm = _efm.lock().unwrap();
+
+        match efm.read_block(addr, INBUF as i32, BLFLAGS_R) {
             Ok(buf) => { pktdbg!(buf); Ok(buf) },
             Err(err) => Err(format!("Could not read block memory: {}", err))
         }
@@ -823,7 +847,10 @@ impl Instrument {
 
         // Check FIFO empty flag; on error assume it's busy; you shouldn't be reading
         // the output anyway.
-        let response = match self.efm.read_block(FIFOBUSYADDR, 1i32, BLFLAGS_R) {
+
+        let _efm = self.efm.clone();
+        let efm = _efm.lock().unwrap();
+        let response = match efm.read_block(FIFOBUSYADDR, 1i32, BLFLAGS_R) {
             Ok(buf) => { pktdbg!(buf); buf[0] },
             Err(_) => { eprintln!("Error reading FIFO busy"); 0u8 }
         };
