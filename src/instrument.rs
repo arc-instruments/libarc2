@@ -149,6 +149,88 @@ pub enum ControlMode {
     Internal
 }
 
+/// Read-out voltage configuration for pulse trains
+///
+/// This enum controls _how_ read-outs should be performed during a ramp
+/// operation. If `Bias` is selected then read-outs will be done at the
+/// existing bias (this would be common for an I-V like ramp). If `Arb`
+/// is selected then read-outs will be performed at the user specified
+/// voltage. If `Never` is selected no read-outs will be performed (which
+/// also implies [`ReadAfter::Never`].
+#[derive(Clone)]
+pub enum ReadAt {
+    Bias,
+    Arb(f32),
+    Never
+}
+
+impl ReadAt {
+    /// Unwrap the inner Arbitrary voltage. This will panic if `self` is
+    /// not of type [`ReadAt::Arb`]
+    pub fn arb(self) -> f32 {
+        if let ReadAt::Arb(v) = self { v } else { panic!("Not Arb variant") }
+    }
+
+    fn is_never(&self) -> bool {
+        match self {
+            ReadAt::Never => true,
+            _ => false
+        }
+    }
+}
+
+/// Read-out frequency configuration for pulse trains
+///
+/// This enum controls _when_ read-outs should be performed during a ramp
+/// operation. If `Pulse` is selected the read-outs will be done after
+/// each pulse. If `Ramp` is selected a single read-out will be performed
+/// at the end of the pulse train. `Block` will perform a single read after
+/// all repetitions of a pulse at a specific voltage have elapsed. Obviously
+/// if singular pulse ramps are used (one pulse per voltage), `Block` and
+/// `Pulse` behave identically. If `Never` is used then no read-outs
+/// will be performed (which also implies [`ReadAt::Never`]).
+#[derive(Clone)]
+pub enum ReadAfter {
+    Pulse,
+    Block,
+    Ramp,
+    Never
+}
+
+impl ReadAfter {
+
+    fn is_never(&self) -> bool {
+        match self {
+            ReadAfter::Never => true,
+            _ => false
+        }
+    }
+
+    fn is_at_ramp(&self) -> bool {
+        match self {
+            ReadAfter::Ramp => true,
+            _ => false
+        }
+    }
+}
+
+/// Read-out mode for bulk memory reads
+///
+/// This is primarily used with [`Instrument::pick_one`] to read a block
+/// of memory values from the internal long process buffer. When `Words`
+/// is selected only the 32 values that correspond to configured word channels
+/// will be retrieved in ascending channel order. When `Bits` is selected
+/// the 32 values that correspond to the configured bit channels will be
+/// retrieved, again in ascending channel order. When `All` is selected all
+/// raw values in ascending channel number are retrieved.
+#[derive(Clone)]
+pub enum DataMode {
+    Words,
+    Bits,
+    All
+}
+
+
 /// ArC2 entry level object
 ///
 /// `Instrument` implements the frontend for the ArC2. Its role is essentially
@@ -1466,6 +1548,174 @@ impl Instrument {
         self.process(iologic.compile())?;
 
         Ok(self)
+    }
+
+    pub fn generate_ramp(&mut self,
+        low: usize, high: usize,
+        vstart: f32, vstep: f32, vstop: f32,
+        pw_nanos: u128, inter_nanos: u128,
+        num_pulses: usize,
+        read_at: ReadAt, read_after: ReadAfter) ->
+        Result<&mut Self, String> {
+
+
+        // helper function for reads
+        fn __do_read(slf: &mut Instrument, low: usize, high: usize, read_at: &ReadAt,
+            bias_voltage: f32) -> Result<Chunk, String> {
+
+            let chunk = match read_at {
+                ReadAt::Bias => {
+                    slf._amp_prep()?
+                       ._read_slice_inner(low, &[high], vidx!(-bias_voltage))?
+                },
+                ReadAt::Arb(arbv) => {
+                    slf._amp_prep()?
+                       ._read_slice_inner(low, &[high], vidx!(-arbv))?
+                },
+                // if ReadAt or ReadAfter is never no reads will ever be performed
+                ReadAt::Never => {
+                    unreachable!()
+                }
+            };
+
+            Ok(chunk)
+        }
+
+        // helper function for interpulse waits
+        fn __inter_wait(slf: &mut Instrument, nanos: u128) -> Result<(), String> {
+
+            // if there's no interpulse just exit quickly
+            if nanos > 0u128 {
+                slf.ground_all_fast()?;
+                slf.add_delay(nanos)?;
+            }
+
+            Ok(())
+        }
+
+        // Check if voltage ramp is described correctly
+        if vstop < vstart && vstep >= 0.0 {
+            return Err(format!(
+                "Invalid ramp voltages: Vstart: {}, Vstop: {}, Vstep: {}",
+                vstart, vstop, vstep));
+        }
+
+        // make the voltage list
+        let voltages = if vstep < 0.0 {
+            Array::range(vstart, vstop - vstep*0.5, vstep)
+        } else {
+            Array::range(vstart, vstop + vstep*0.5, vstep)
+        };
+
+        let sender = self._sender.clone();
+
+        for v in &voltages {
+
+            for pidx in 0..num_pulses {
+
+                if pw_nanos < 500_000_000u128 {
+                    self.pulse_one_fast(low, high, *v, pw_nanos, true)?;
+                } else {
+                    self.pulse_one_slow(low, high, *v, pw_nanos)?;
+                }
+
+                // No reads are required; interpulse wait and loop to
+                // the next pulse
+                if read_after.is_never() || read_at.is_never() {
+                    __inter_wait(self, inter_nanos)?;
+                    continue;
+                }
+
+                match read_after {
+                    // If reading after every pulse just follow through
+                    ReadAfter::Pulse => { },
+                    ReadAfter::Block => {
+                        if pidx < num_pulses - 1 {
+                            // not at the end of the block
+                            continue;
+                        }
+                    },
+                    // not at the end of the ramp yet, see below
+                    // inter wait and move to next pulse
+                    ReadAfter::Ramp => {
+                        __inter_wait(self, inter_nanos)?;
+                        continue;
+                    },
+                    // already covered
+                    ReadAfter::Never => { unreachable!(); }
+                };
+
+                let chunk = __do_read(self, low, high, &read_at, *v)?;
+                match sender.send(Some(chunk)) {
+                    Ok(()) => {},
+                    Err(err) => { return Err(format!("Send error: {:?}", err)); }
+                }
+
+                // if there's interpulse remove bias and wait
+                __inter_wait(self, inter_nanos)?;
+            }
+        }
+
+        // if we are doing read after ramp, do it here as the ramp is finished now
+        if read_after.is_at_ramp() {
+            // take the last value of the voltage list
+            let voltage = voltages.as_slice().unwrap().last().unwrap();
+            let chunk = __do_read(self, low, high, &read_at, *voltage)?;
+            match sender.send(Some(chunk)) {
+                Ok(()) => {},
+                Err(err) => { return Err(format!("Send error: {:?}", err)); }
+            }
+        };
+
+        Ok(self)
+    }
+
+    /// Read one block of values from the internal buffer
+    pub fn pick_one(&mut self, mode: DataMode) -> Result<Option<Vec<f32>>, String> {
+        let _receiver = self._receiver.clone();
+        let receiver = _receiver.lock().unwrap();
+
+        let chunk_opt: Option<Chunk>;
+
+        loop {
+            match receiver.try_recv() {
+                Ok(x) => {
+                    chunk_opt = x;
+                    break
+                },
+                Err(TryRecvError::Empty) => {
+                    if self.busy() {
+                        continue
+                    } else {
+                        chunk_opt = None;
+                        break;
+                    }
+                },
+                Err(TryRecvError::Disconnected) => { chunk_opt = None; break; }
+            }
+        }
+
+        let _memman = self.memman.clone();
+        let mut memman = _memman.write().unwrap();
+
+
+        if chunk_opt.is_some() {
+            let mut chunk = chunk_opt.unwrap();
+
+            let ret: Vec<f32> = match mode {
+                DataMode::Words => self.word_currents_from_address(chunk.addr())?,
+                DataMode::Bits => self.bit_currents_from_address(chunk.addr())?,
+                DataMode::All => {
+                    self.currents_from_address(chunk.addr(), &ALL_CHANS)?
+                }
+            };
+
+            memman.free_chunk(&mut chunk)?;
+
+            Ok(Some(ret))
+        } else {
+            Ok(None)
+        }
     }
 
 }
