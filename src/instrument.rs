@@ -71,6 +71,10 @@ lazy_static! {
         instr
     };
 
+    static ref ALL_CHANS: Vec<usize> = {
+        (0usize..64).collect()
+    };
+
     static ref ALL_WORDS: Vec<usize> = {
         let mut channels: Vec<usize> = Vec::with_capacity(32);
         channels.append(&mut (16usize..32).collect::<Vec<usize>>());
