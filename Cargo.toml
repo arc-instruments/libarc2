@@ -8,7 +8,7 @@ edition = "2018"
 name = "libarc2"
 
 [dependencies]
-ndarray = "0.14"
+ndarray = "0.15"
 bitvec = "0.21"
 bitflags = "1.2"
 num-derive = "0.3"
