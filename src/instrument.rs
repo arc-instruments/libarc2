@@ -1,6 +1,6 @@
 use std::{time, thread};
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{RwLock, Arc, Mutex};
 use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
 
@@ -159,8 +159,10 @@ pub struct Instrument {
     // over the buffer. The same could be done with Rc<RefCell<>>
     // but unfortunately these do not implement Sync and the python
     // bindings will fail to compile. Hence the use of Arc/Mutex
-    instr_buffer: Option<Arc<Mutex<Vec<u8>>>>,
-    memman: Arc<Mutex<MemMan>>,
+    instr_buffer: Option<Arc<RwLock<Vec<u8>>>>,
+
+    // Memory management
+    memman: Arc<RwLock<MemMan>>,
 }
 
 /// Find available device IDs.
@@ -247,12 +249,12 @@ impl Instrument {
             return Err(format!("No such device id: {}", id));
         }
 
-        let buffer: Option<Arc<Mutex<Vec<u8>>>>;
+        let buffer: Option<Arc<RwLock<Vec<u8>>>>;
 
         // If in retained mode preallocate space for 10×768 instructions.
         // If not the instruction buffer is not used.
         if retained_mode {
-            buffer = Some(Arc::new(Mutex::new(Vec::with_capacity(10usize*INSTRCAP))));
+            buffer = Some(Arc::new(RwLock::new(Vec::with_capacity(10usize*INSTRCAP))));
         } else {
             buffer = None;
         }
@@ -261,7 +263,7 @@ impl Instrument {
             Ok(d) => Ok(Instrument {
                 efm: d,
                 instr_buffer: buffer,
-                memman: Arc::new(Mutex::new(MemMan::new()))
+                memman: Arc::new(RwLock::new(MemMan::new())),
             }),
             Err(err) => Err(format!("Could not open device: {}", err))
         }
@@ -299,7 +301,7 @@ impl Instrument {
         let mut bytes = instr.to_bytevec();
 
         if let Some(buff) = &mut self.instr_buffer.clone() {
-            buff.lock().unwrap().extend(bytes);
+            buff.write().unwrap().extend(bytes);
             return Ok(());
         }
 
@@ -347,7 +349,7 @@ impl Instrument {
             Some(ref mut buf) => {
                 #[cfg(not(feature="dummy_writes"))] {
                     // lock the instruction buffer
-                    let mut actual_buf = buf.lock().unwrap();
+                    let mut actual_buf = buf.write().unwrap();
 
                     // if buffer is smaller than the instruction cap no
                     // chunking is practically needed (or to put it
@@ -598,7 +600,7 @@ impl Instrument {
         }
 
         let memman = self.memman.clone();
-        let mut manager = memman.lock().unwrap();
+        let mut manager = memman.write().unwrap();
         let chunk = manager.alloc_chunk().unwrap();
 
         #[cfg(feature="zero_before_write")]
@@ -637,7 +639,7 @@ impl Instrument {
             data[4*high+2], data[4*high+3]]);
 
         // Free up the FPGA chunk for reuse
-        let mut manager = self.memman.lock().unwrap();
+        let mut manager = self.memman.write().unwrap();
         manager.free_chunk(&mut chunk)?;
 
         if high % 2 == 0 {
@@ -680,7 +682,7 @@ impl Instrument {
         }
 
         // Free up the FPGA chunk for reuse
-        let mut manager = self.memman.lock().unwrap();
+        let mut manager = self.memman.write().unwrap();
         manager.free_chunk(&mut chunk)?;
 
         Ok(res)
@@ -748,7 +750,7 @@ impl Instrument {
         }
 
         // Free up the FPGA chunk for reuse
-        let mut manager = self.memman.lock().unwrap();
+        let mut manager = self.memman.write().unwrap();
         manager.free_chunk(&mut chunk)?;
 
         Ok(res)
@@ -1236,7 +1238,7 @@ impl Instrument {
             let val = u32::from_le_bytes([data[4*high+0], data[4*high+1], data[4*high+2],
                 data[4*high+3]]);
 
-            let mut manager = self.memman.lock().unwrap();
+            let mut manager = self.memman.write().unwrap();
             manager.free_chunk(&mut chunk)?;
 
             if high % 2 == 0 {
@@ -1279,7 +1281,7 @@ impl Instrument {
                 .execute()?;
             let res = func(&self, chunk.addr());
 
-            let mut manager = self.memman.lock().unwrap();
+            let mut manager = self.memman.write().unwrap();
             manager.free_chunk(&mut chunk)?;
 
             res
@@ -1326,7 +1328,7 @@ impl Instrument {
             }
 
             // read data and release memory back to the pool
-            let mut manager = self.memman.lock().unwrap();
+            let mut manager = self.memman.write().unwrap();
             for mut chunk in chunks {
                 result.append(&mut func(&self, chunk.addr())?);
                 manager.free_chunk(&mut chunk)?;
@@ -1397,7 +1399,7 @@ impl Instrument {
                 }
             }
 
-            let mut manager = self.memman.lock().unwrap();
+            let mut manager = self.memman.write().unwrap();
             manager.free_chunk(&mut chunk)?;
 
         } else {
