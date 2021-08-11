@@ -1586,7 +1586,6 @@ impl Instrument {
 
             // if there's no interpulse just exit quickly
             if nanos > 0u128 {
-                slf.ground_all_fast()?;
                 slf.add_delay(nanos)?;
             }
 
@@ -1614,9 +1613,11 @@ impl Instrument {
             for pidx in 0..num_pulses {
 
                 if pw_nanos < 500_000_000u128 {
-                    self.pulse_one_fast(low, high, *v, pw_nanos, true)?;
+                    self.pulse_one_fast(low, high, *v, pw_nanos, true)?
+                        .ground_all_fast()?;
                 } else {
-                    self.pulse_one_slow(low, high, *v, pw_nanos)?;
+                    self.pulse_one_slow(low, high, *v, pw_nanos)?
+                        .ground_all_fast()?;
                 }
 
                 // No reads are required; interpulse wait and loop to
