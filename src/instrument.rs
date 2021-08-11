@@ -1646,6 +1646,26 @@ impl Instrument {
 
         for v in &voltages {
 
+            // if num pulses is 0 then no pulsing will be done, only reads
+            if num_pulses == 0 {
+                // but only if we're actually reading at pulse. Obviously
+                // using anything other than ReadAfter::Pulse when num_pulses is 0
+                // makes no sense, but for consistency's sake we make sure that
+                // the convention is followed even in this unusual scenario.
+                match read_after {
+                    ReadAfter::Pulse => {
+                        let chunk = __do_read(self, low, high, &read_at, *v)?;
+                        match sender.send(Some(chunk)) {
+                            Ok(()) => {},
+                            Err(err) => { return Err(format!("Send error: {:?}", err)); }
+                        }
+                    },
+                    _ => { eprintln!("RMP: read-only ramp without ReadAfter::Pulse!!"); }
+                };
+
+                continue;
+            }
+
             for pidx in 0..num_pulses {
 
                 if pw_nanos < 500_000_000u128 {
