@@ -484,7 +484,7 @@ impl Instrument {
                                 // wait until the FPGA instr. buffer is expended
                                 // otherwise new instructions might overwrite older
                                 // ones
-                                self.wait();
+                                self.__wait_no_lock(&efm);
                             },
                             Err(err) => { return Err(format!("Buffer not written: {};
                                 expect errors", err)); }
@@ -941,6 +941,18 @@ impl Instrument {
         response != 1u8
     }
 
+    // Variant of busy for internal use when a lock to a bl::Device has already
+    // been acquired
+    fn __busy_no_lock(&self, efm: &bl::Device) -> bool {
+        let response = match efm.read_block(FIFOBUSYADDR, 1i32, BLFLAGS_R) {
+            Ok(buf) => { pktdbg!(buf); buf[0] },
+            Err(_) => { eprintln!("Error reading FIFO busy"); 0u8 }
+        };
+
+        // If value is 0x01 the FIFO is empty (and therefore NOT busy)
+        response != 1u8
+    }
+
 
     /// Block until the instrument has executed its command buffer.
     pub fn wait(&self) {
@@ -949,6 +961,30 @@ impl Instrument {
         let mut exponent: u32 = 0;
 
         while self.busy() {
+
+            // limit maximum polling to 100 ms
+            if exponent < 5 {
+                if counter == 9 {
+                    counter = 0;
+                    exponent += 1;
+                } else {
+                    counter += 1;
+                }
+            }
+
+            let wait = std::time::Duration::from_nanos(10u64.pow(exponent) * 1000u64);
+            std::thread::sleep(wait);
+        }
+    }
+
+    // Variant of wait for internal use when a lock to a bl::Device has already
+    // been acquired
+    fn __wait_no_lock(&self, efm: &bl::Device) {
+
+        let mut counter: u64 = 0;
+        let mut exponent: u32 = 0;
+
+        while self.__busy_no_lock(efm) {
 
             // limit maximum polling to 100 ms
             if exponent < 5 {
