@@ -1636,11 +1636,7 @@ impl Instrument {
         }
 
         // make the voltage list
-        let voltages = if vstep < 0.0 {
-            Array::range(vstart, vstop - vstep*0.5, vstep)
-        } else {
-            Array::range(vstart, vstop + vstep*0.5, vstep)
-        };
+        let voltages = Array::range(vstart, vstop, vstep);
 
         let sender = self._sender.clone();
 
