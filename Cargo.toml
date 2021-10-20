@@ -2,7 +2,11 @@
 name = "libarc2"
 version = "0.1.0"
 authors = ["Spyros Stathopoulos <spyros@arc-instruments.co.uk>"]
+description = "Low-level interface library for ArC TWO™"
 edition = "2018"
+license = "LGPLv2"
+homepage = "http://arc-instruments.co.uk"
+repository = "https://github.com/arc-instruments/libarc2"
 
 [lib]
 name = "libarc2"
