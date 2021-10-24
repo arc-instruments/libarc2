@@ -8,6 +8,8 @@ license = "LGPLv2"
 homepage = "http://arc-instruments.co.uk"
 repository = "https://github.com/arc-instruments/libarc2"
 
+exclude = ["getbl-win32.py"]
+
 [lib]
 name = "libarc2"
 
