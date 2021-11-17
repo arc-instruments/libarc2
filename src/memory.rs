@@ -71,6 +71,10 @@ impl Chunk {
         self._addr
     }
 
+    pub fn offset(&self) -> u32 {
+        self._addr / (CHUNK_SIZE as u32)
+    }
+
     /// Returns `true` if the data is still active, as in not
     /// yet picked up by the consumer. If `false` the region
     /// represented by the chunk is available to reuse.

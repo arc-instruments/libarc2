@@ -513,6 +513,65 @@ impl Instrument {
 
     }
 
+    /// Clears everything in the output buffer. Use this to discard any
+    /// unwanted results and free up the memory. If you want to retrieve
+    /// values use [`Instrument::pick_one()`] which will free up memory
+    /// as values are retrieved.
+    pub fn free_output_buffer(&self) -> Result<(), String> {
+        let _receiver = self._receiver.clone();
+        let receiver = _receiver.lock().unwrap();
+
+        // iterate through everything in the receiver and free
+        // the address chunks
+        for item in receiver.iter() {
+            match item {
+                Some(mut chunk) => {
+                    let _memman = self.memman.clone();
+                    let mut memman = _memman.write().unwrap();
+                    memman.free_chunk(&mut chunk)?
+                    // memman is released here
+                },
+                None => {}
+            }
+        }
+
+        Ok(())
+
+    }
+
+    /// Allocate a memory area
+    fn make_chunk(&self) -> Result<Chunk, String> {
+        let _memman = self.memman.clone();
+        let mut memman = _memman.write().unwrap();
+
+        match memman.alloc_chunk() {
+            Ok(chunk) => Ok(chunk),
+            Err(err) => Err(err.to_string())
+        }
+    }
+
+    /// Read a chunk's contents in a word, bit or full mode
+    fn read_chunk(&self, chunk: &mut Chunk, mode: &DataMode) -> Result<Vec<f32>, String> {
+
+        let ret: Vec<f32> = match mode {
+            DataMode::Words => self.word_currents_from_address(chunk.addr())?,
+            DataMode::Bits => self.bit_currents_from_address(chunk.addr())?,
+            DataMode::All => {
+                self.currents_from_address(chunk.addr(), &ALL_CHANS)?
+            }
+        };
+
+        let _memman = self.memman.clone();
+        let mut memman = _memman.write().unwrap();
+        memman.free_chunk(chunk)?;
+        /*
+         * TODO: Zero offset flag when this is supported by the FPGA
+         */
+
+        Ok(ret)
+    }
+
+
     /// Add a delay to the FIFO command buffer
     pub fn add_delay(&mut self, nanos: u128) -> Result<&mut Self, String> {
 
@@ -536,7 +595,7 @@ impl Instrument {
     }
 
     /// Read raw data from block memory
-    pub fn read_raw(&self, addr: u32) -> Result<Vec<u8>, String> {
+    fn read_raw(&self, addr: u32) -> Result<Vec<u8>, String> {
         let _efm = self.efm.clone();
         let efm = _efm.lock().unwrap();
 
@@ -709,9 +768,7 @@ impl Instrument {
             adcmask.set_enabled(*chan, true);
         }
 
-        let memman = self.memman.clone();
-        let mut manager = memman.write().unwrap();
-        let chunk = manager.alloc_chunk().unwrap();
+        let chunk = self.make_chunk().unwrap();
 
         #[cfg(feature="zero_before_write")]
         match self._zero_chunk(&chunk) {
@@ -741,22 +798,11 @@ impl Instrument {
         // ... and finally withdraw voltage from the biasing channels
         self.ground_all()?.execute()?;
 
-        // Read the data from the address chunk
-        let data = self.read_raw(chunk.addr())?;
+        // Read the requested chunk...
+        let res = self.read_chunk(&mut chunk, &DataMode::All)?;
 
-        // Assemble the number from the 4 neighbouring bytes
-        let val: u32 = u32::from_le_bytes([data[4*high+0], data[4*high+1],
-            data[4*high+2], data[4*high+3]]);
-
-        // Free up the FPGA chunk for reuse
-        let mut manager = self.memman.write().unwrap();
-        manager.free_chunk(&mut chunk)?;
-
-        if high % 2 == 0 {
-            Ok(_adc_to_current(val))
-        } else {
-            Ok(-1.0*_adc_to_current(val))
-        }
+        // ... and return only the requested channel
+        Ok(res[high])
     }
 
     /// Read all the values which have `chan` as the low potential channel
@@ -779,7 +825,7 @@ impl Instrument {
             chunk = self._read_slice_inner(chan, &*ALL_WORDS, vidx!(-vread))?;
             // ... and finally withdraw voltage from the biasing channels
             self.ground_all()?.execute()?;
-            res = self.word_currents_from_address(chunk.addr())?;
+            res = self.read_chunk(&mut chunk, &DataMode::Words)?;
         // Or the other way around. Channels 16..32 and
         // 48..64 correspond to columns so we want to read
         // from all the rows in the column.
@@ -788,12 +834,8 @@ impl Instrument {
             chunk = self._read_slice_inner(chan, &*ALL_BITS, vidx!(-vread))?;
             // ... and finally withdraw voltage from the biasing channels
             self.ground_all()?.execute()?;
-            res = self.bit_currents_from_address(chunk.addr())?;
+            res = self.read_chunk(&mut chunk, &DataMode::Bits)?;
         }
-
-        // Free up the FPGA chunk for reuse
-        let mut manager = self.memman.write().unwrap();
-        manager.free_chunk(&mut chunk)?;
 
         Ok(res)
     }
@@ -840,28 +882,17 @@ impl Instrument {
         let mut res: Vec<f32> = Vec::with_capacity(32);
 
         // Read the raw chunk of data
-        let data = self.read_raw(chunk.addr())?;
+        let data = self.read_chunk(&mut chunk, &DataMode::All)?;
 
         // Convert adc values to current
         for chan in all_channels {
 
             if all_channels_set.contains(&chan) {
-                let raw_value = u32::from_le_bytes([data[4*chan+0],
-                    data[4*chan+1], data[4*chan+2], data[4*chan+3]]);
-                let cur = if chan % 2 == 0 {
-                    _adc_to_current(raw_value)
-                } else {
-                    -1.0*_adc_to_current(raw_value)
-                };
-                res.push(cur);
+                res.push(data[*chan]);
             } else {
                 res.push(f32::NAN);
             }
         }
-
-        // Free up the FPGA chunk for reuse
-        let mut manager = self.memman.write().unwrap();
-        manager.free_chunk(&mut chunk)?;
 
         Ok(res)
     }
@@ -1383,18 +1414,9 @@ impl Instrument {
             self.ground_all_fast()? // we are already in VoltArb no need to AmpPrep again
                 .execute()?;
 
-            let data = self.read_raw(chunk.addr())?;
-            let val = u32::from_le_bytes([data[4*high+0], data[4*high+1], data[4*high+2],
-                data[4*high+3]]);
+            let data = self.read_chunk(&mut chunk, &DataMode::All)?;
+            Ok(data[high])
 
-            let mut manager = self.memman.write().unwrap();
-            manager.free_chunk(&mut chunk)?;
-
-            if high % 2 == 0 {
-                Ok(_adc_to_current(val))
-            } else {
-                Ok(-1.0*_adc_to_current(val))
-            }
         } else {
             // For the slow path the delays included are 3 order of magnitude
             // smaller than the indented pulse width so we're just doing a
@@ -1410,15 +1432,16 @@ impl Instrument {
     /// Pulse and read a slice. Semantics and arguments follow the same conventions as
     /// [`Instrument::read_slice`] and [`Instrument::pulse_slice`];
     pub fn pulseread_slice(&mut self, chan: usize, vpulse: f32, nanos: u128, vread: f32) -> Result<Vec<f32>, String> {
-        let func: fn(&Instrument, u32) -> Result<Vec<f32>, String>;
+
+        let mode: DataMode;
         let channels: &Vec<usize>;
 
         if (chan < 16) || ((32 <= chan) && (chan < 48)) {
             channels = &*ALL_WORDS;
-            func = Instrument::word_currents_from_address;
+            mode = DataMode::Words;
         } else {
             channels = &*ALL_BITS;
-            func = Instrument::bit_currents_from_address;
+            mode = DataMode::Bits;
         }
 
         if nanos < 500_000_000u128 {
@@ -1428,10 +1451,7 @@ impl Instrument {
                                 ._read_slice_inner(chan, channels, vidx!(-vread))?;
             self.ground_all_fast()?
                 .execute()?;
-            let res = func(&self, chunk.addr());
-
-            let mut manager = self.memman.write().unwrap();
-            manager.free_chunk(&mut chunk)?;
+            let res = self.read_chunk(&mut chunk, &mode);
 
             res
         } else {
@@ -1452,39 +1472,47 @@ impl Instrument {
     /// Pulse and immediately read all crosspoints. Semantics and arguments follow the same
     /// conventions as [`Instrument::read_all`] and [`Instrument::pulse_all'].
     pub fn pulseread_all(&mut self, vpulse: f32, nanos: u128, vread: f32, order: BiasOrder) -> Result<Vec<f32>, String> {
-        let func: fn(&Instrument, u32) -> Result<Vec<f32>, String>;
-        let channels: &Vec<usize>;
+
+        let mode: DataMode;
+        let bias_channels: &Vec<usize>;
+        let read_channels: &Vec<usize>;
         let mut result = Vec::with_capacity(32*32);
 
         match order {
-            BiasOrder::Rows => { channels = &*ALL_WORDS; func = Instrument::word_currents_from_address; },
-            BiasOrder::Columns => { channels = &*ALL_BITS; func = Instrument::bit_currents_from_address; },
+            BiasOrder::Rows => {
+                bias_channels = &*ALL_WORDS;
+                read_channels = &*ALL_BITS;
+                mode = DataMode::Bits;
+            },
+            BiasOrder::Columns => {
+                bias_channels = &*ALL_BITS;
+                read_channels = &*ALL_WORDS;
+                mode = DataMode::Words;
+            },
         };
 
         if nanos < 500_000_000u128 {
-            let chunks: Vec<Chunk> = Vec::with_capacity(32);
-            for chan in channels {
+            let mut chunks: Vec<Chunk> = Vec::with_capacity(32);
+
+            for chan in bias_channels {
                 let chunk = self.pulse_slice_fast(*chan, vpulse, nanos, None, true)?
                                 .ground_all_fast()?
                                 ._amp_prep()?
-                                ._read_slice_inner(*chan, channels, vidx!(-vread))?;
+                                ._read_slice_inner(*chan, read_channels, vidx!(-vread))?;
                 self.ground_all_fast()?
                     .execute()?;
 
-                let mut res = func(&self, chunk.addr())?;
-                result.append(&mut res);
+                chunks.push(chunk);
 
             }
 
-            // read data and release memory back to the pool
-            let mut manager = self.memman.write().unwrap();
             for mut chunk in chunks {
-                result.append(&mut func(&self, chunk.addr())?);
-                manager.free_chunk(&mut chunk)?;
+                let mut data = self.read_chunk(&mut chunk, &mode)?;
+                result.append(&mut data);
             }
 
         } else {
-            for chan in channels {
+            for chan in bias_channels {
                 self.pulse_slice_slow(*chan, vpulse, nanos, None)?
                     .ground_all()?;
                 result.append(&mut self.read_slice(*chan, vread)?);
@@ -1531,25 +1559,15 @@ impl Instrument {
                 .execute()?;
 
             res = Vec::with_capacity(32);
-            let data = self.read_raw(chunk.addr())?;
+            let data = self.read_chunk(&mut chunk, &DataMode::All)?;
 
             for chan in all_channels {
                 if all_channels_set.contains(&chan) {
-                    let raw_value = u32::from_le_bytes([data[4*chan+0],
-                        data[4*chan+1], data[4*chan+2], data[4*chan+3]]);
-                    let cur = if chan % 2 == 0 {
-                        _adc_to_current(raw_value)
-                    } else {
-                        -1.0*_adc_to_current(raw_value)
-                    };
-                    res.push(cur);
+                    res.push(data[*chan]);
                 } else {
                     res.push(f32::NAN);
                 }
             }
-
-            let mut manager = self.memman.write().unwrap();
-            manager.free_chunk(&mut chunk)?;
 
         } else {
             self.pulse_slice_slow(chan, vpulse, nanos, Some(mask))?
@@ -1748,24 +1766,13 @@ impl Instrument {
             }
         }
 
-        let _memman = self.memman.clone();
-        let mut memman = _memman.write().unwrap();
-
-
         if chunk_opt.is_some() {
             let mut chunk = chunk_opt.unwrap();
 
-            let ret: Vec<f32> = match mode {
-                DataMode::Words => self.word_currents_from_address(chunk.addr())?,
-                DataMode::Bits => self.bit_currents_from_address(chunk.addr())?,
-                DataMode::All => {
-                    self.currents_from_address(chunk.addr(), &ALL_CHANS)?
-                }
-            };
-
-            memman.free_chunk(&mut chunk)?;
-
-            Ok(Some(ret))
+            match self.read_chunk(&mut chunk, &mode) {
+                Ok(v) => Ok(Some(v)),
+                Err(e) => Err(e)
+            }
         } else {
             Ok(None)
         }
