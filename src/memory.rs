@@ -5,10 +5,14 @@ const MEM_SIZE: usize = 1024*1024*1024; // 1GiB of onboard memory
 const DRAM_BASE: u32 = 0x0000_0000;
 
 
-/// Error type for memory operations
+/// Error type for memory operations. The only two variants at this
+/// stage are `ENOMEM` when the FPGA is out of memory and `EDFREE`
+/// when an attempt was made to free the same memory segment.
 #[derive(Debug)]
-pub(crate) enum MemoryError {
+pub enum MemoryError {
+    /// Out of memory
     ENOMEM,
+    /// Double free
     EDFREE,
 }
 

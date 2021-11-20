@@ -5,12 +5,13 @@ use std::sync::{RwLock, Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
+use thiserror::Error;
 
 use crate::instructions::*;
 use crate::registers::{ChannelState, ChanMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
 use crate::registers::consts::HSCLUSTERMAP;
-use crate::memory::{MemMan, Chunk};
+use crate::memory::{MemMan, Chunk, MemoryError};
 
 const EFM03_VID: u16 = 0x10f8;
 const EFM03_PID: u16 = 0xc583;
@@ -122,6 +123,34 @@ lazy_static! {
     };
 }
 
+#[derive(Error, Debug)]
+pub enum ArC2Error {
+    /// Low level FPGA communication error
+    #[error("FPGA Error: {0}")]
+    FPGAError(#[from] bl::BLError),
+    /// Memory management error
+    #[error("Memory error: {0}")]
+    MemoryError(#[from] MemoryError),
+    /// Invalid Device ID or device not existing
+    #[error("Invalid ArC2 device id: {0}")]
+    InvalidID(i32),
+    /// Invalid ramp parameters
+    #[error("Ramp operation error: Vstart {0}, Vstop {1}, Vstep {2}")]
+    RampOperationError(f32, f32, f32),
+    /// Output buffer access error
+    #[error("Cannot store address {0} to output buffer")]
+    OutputBufferError(i64)
+}
+
+impl std::convert::From<std::sync::mpsc::SendError<Option<Chunk>>> for ArC2Error {
+    fn from(error: std::sync::mpsc::SendError<Option<Chunk>>) -> Self {
+        let chunk = error.0;
+        match chunk {
+            Some(c) => ArC2Error::OutputBufferError(c.addr() as i64),
+            None => ArC2Error::OutputBufferError(-1)
+        }
+    }
+}
 
 /// Order of read/pulse operation when reading all crosspoints
 ///
@@ -266,17 +295,18 @@ pub struct Instrument {
 /// This function will enumerate all available boards and return an array
 /// with the IDs of all found devices. This can be passed on to
 /// [`Instrument::open()`] to connect to a specific device.
-pub fn find_ids() -> Result<Vec<i32>, String> {
-    let max_id = match bl::enumerate(EFM03_VID, EFM03_PID) {
+pub fn find_ids() -> Result<Vec<i32>, ArC2Error> {
+    /*let max_id = match bl::enumerate(EFM03_VID, EFM03_PID) {
         Ok(v) => Ok(v),
         Err(err) => Err(format!("Could not enumerate devices: {}", err))
-    }?;
+    }?;*/
+    let max_id = bl::enumerate(EFM03_VID, EFM03_PID)?;
 
     if max_id >= 0 {
         Ok((0..max_id).collect())
     } else {
         // max_id -1 usually indicates an error...
-        Err(format!("Invalid max id: {}", max_id))
+        Err(ArC2Error::InvalidID(max_id))
     }
 }
 
@@ -339,10 +369,10 @@ impl Instrument {
     /// to discover devices. Set `retained_mode` to `true` to defer
     /// writing instructions until an [`Instrument::execute()`]
     /// has been called explicitly.
-    pub fn open(id: i32, retained_mode: bool) -> Result<Instrument, String> {
+    pub fn open(id: i32, retained_mode: bool) -> Result<Instrument, ArC2Error> {
 
         if !find_ids()?.contains(&id) {
-            return Err(format!("No such device id: {}", id));
+            return Err(ArC2Error::InvalidID(id));
         }
 
         let buffer: Option<Arc<RwLock<Vec<u8>>>>;
@@ -365,24 +395,25 @@ impl Instrument {
                 _sender: sender,
                 _receiver: Arc::new(Mutex::new(receiver))
             }),
-            Err(err) => Err(format!("Could not open device: {}", err))
+            Err(err) => Err(ArC2Error::FPGAError(err))
         }
     }
 
     /// Load an FPGA bitstream from a file.
-    pub fn load_firmware(&self, path: &str) -> Result<(), String> {
+    pub fn load_firmware(&self, path: &str) -> Result<(), ArC2Error> {
         let _efm = self.efm.clone();
         let efm = _efm.lock().unwrap();
-        match efm.program_from_file(&path) {
+        /*match efm.program_from_file(&path) {
             Ok(()) => { Ok(()) },
             Err(err) => { Err(format!("Could not program FPGA: {}", err)) }
-        }
+        }*/
+        efm.program_from_file(&path).map_err(|e| ArC2Error::FPGAError(e) )
     }
 
     /// Open a new Instrument with a specified id and bitstream.
     /// This essentially combines [`Instrument::open()`] and
     /// [`Instrument::load_firmware()`].
-    pub fn open_with_fw(id: i32, path: &str, retained_mode: bool) -> Result<Instrument, String> {
+    pub fn open_with_fw(id: i32, path: &str, retained_mode: bool) -> Result<Instrument, ArC2Error> {
         let mut instr = Instrument::open(id, retained_mode)?;
         instr.load_firmware(&path)?;
         instr.process(&*RESET_DAC)?;
@@ -395,7 +426,7 @@ impl Instrument {
     }
 
     /// Process a compiled instruction
-    pub fn process<T: Instruction>(&mut self, instr: &T) -> Result<(), String> {
+    pub fn process<T: Instruction>(&mut self, instr: &T) -> Result<(), ArC2Error> {
 
         instrdbg!(instr);
 
@@ -416,7 +447,7 @@ impl Instrument {
             Ok(()) => {
                 thread::sleep(WRITEDELAY);
             },
-            Err(err) => return Err(format!("Could not write buffer: {}", err))
+            Err(err) => return Err(ArC2Error::FPGAError(err))
         }
 
         #[cfg(feature="dummy_writes")]
@@ -427,7 +458,7 @@ impl Instrument {
 
     /// Zero an FPGA address chunk
     #[cfg(feature="zero_before_write")]
-    fn _zero_chunk(&mut self, chunk: &Chunk) -> Result<(), String> {
+    fn _zero_chunk(&mut self, chunk: &Chunk) -> Result<(), ArC2Error> {
         let mut zerobuf: [u8; INBUF] = [0u8; INBUF];
         let addr = chunk.addr();
 
@@ -440,14 +471,14 @@ impl Instrument {
 
                 Ok(())
             },
-            Err(err) => Err(format!("Error: {}; Could not zero address range {}", err, addr))
+            Err(err) => Err(ArC2Error::FPGAError(err))
         }
     }
 
     /// Write all retained instructions to ArC2. Has no effect if
     /// `retained_mode` is `false` since all instructions are
     /// executed as they are issued.
-    pub fn execute(&mut self) -> Result<&mut Self, String> {
+    pub fn execute(&mut self) -> Result<&mut Self, ArC2Error> {
 
         match self.instr_buffer.clone() {
             Some(ref mut buf) => {
@@ -486,8 +517,7 @@ impl Instrument {
                                 // ones
                                 self.__wait_no_lock(&efm);
                             },
-                            Err(err) => { return Err(format!("Buffer not written: {};
-                                expect errors", err)); }
+                            Err(err) => { return Err(ArC2Error::FPGAError(err)); }
                         }
                     }
                     thread::sleep(WRITEDELAY);
@@ -507,7 +537,7 @@ impl Instrument {
     }
 
     /// Compiles and process an instruction
-    pub fn compile_process<T: Instruction>(&mut self, instr: &mut T) -> Result<(), String> {
+    pub fn compile_process<T: Instruction>(&mut self, instr: &mut T) -> Result<(), ArC2Error> {
 
         self.process(instr.compile())
 
@@ -517,7 +547,7 @@ impl Instrument {
     /// unwanted results and free up the memory. If you want to retrieve
     /// values use [`Instrument::pick_one()`] which will free up memory
     /// as values are retrieved.
-    pub fn free_output_buffer(&self) -> Result<(), String> {
+    pub fn free_output_buffer(&self) -> Result<(), ArC2Error> {
         let _receiver = self._receiver.clone();
         let receiver = _receiver.lock().unwrap();
 
@@ -540,18 +570,19 @@ impl Instrument {
     }
 
     /// Allocate a memory area
-    fn make_chunk(&self) -> Result<Chunk, String> {
+    fn make_chunk(&self) -> Result<Chunk, ArC2Error> {
         let _memman = self.memman.clone();
         let mut memman = _memman.write().unwrap();
 
-        match memman.alloc_chunk() {
+        /*match memman.alloc_chunk() {
             Ok(chunk) => Ok(chunk),
             Err(err) => Err(err.to_string())
-        }
+        }*/
+        memman.alloc_chunk().map_err(|e| ArC2Error::MemoryError(e))
     }
 
     /// Read a chunk's contents in a word, bit or full mode
-    fn read_chunk(&self, chunk: &mut Chunk, mode: &DataMode) -> Result<Vec<f32>, String> {
+    fn read_chunk(&self, chunk: &mut Chunk, mode: &DataMode) -> Result<Vec<f32>, ArC2Error> {
 
         let ret: Vec<f32> = match mode {
             DataMode::Words => self.word_currents_from_address(chunk.addr())?,
@@ -573,7 +604,7 @@ impl Instrument {
 
 
     /// Add a delay to the FIFO command buffer
-    pub fn add_delay(&mut self, nanos: u128) -> Result<&mut Self, String> {
+    pub fn add_delay(&mut self, nanos: u128) -> Result<&mut Self, ArC2Error> {
 
         // If a small delay is requested process it immediately, it will
         // be over before the computer can blink!
@@ -595,18 +626,19 @@ impl Instrument {
     }
 
     /// Read raw data from block memory
-    fn read_raw(&self, addr: u32) -> Result<Vec<u8>, String> {
+    fn read_raw(&self, addr: u32) -> Result<Vec<u8>, ArC2Error> {
         let _efm = self.efm.clone();
         let efm = _efm.lock().unwrap();
 
         match efm.read_block(addr, INBUF as i32, BLFLAGS_R) {
             Ok(buf) => { pktdbg!(buf); Ok(buf) },
-            Err(err) => Err(format!("Could not read block memory: {}", err))
+            Err(err) => Err(ArC2Error::FPGAError(err))
         }
+
     }
 
     /// Reset all DACs on the tool. This will execute existing buffers.
-    pub fn reset_dacs(&mut self) -> Result<&mut Self, String> {
+    pub fn reset_dacs(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(20_000u128)?;
@@ -614,13 +646,13 @@ impl Instrument {
     }
 
     /// Disconnect all channels
-    pub fn float_all(&mut self) -> Result<&mut Self, String> {
+    pub fn float_all(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*CHAN_FLOAT_ALL)?;
         Ok(self)
     }
 
     /// Ground all channels reverting them to VoltArb
-    pub fn ground_all(&mut self) -> Result<&mut Self, String> {
+    pub fn ground_all(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(20_000u128)?;
@@ -632,13 +664,13 @@ impl Instrument {
     }
 
     /// Prepare the DACs for transition to VoltArb
-    fn _amp_prep(&mut self) -> Result<&mut Self, String> {
+    fn _amp_prep(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*PREP_AMP_ALL)?;
         self.add_delay(100_000u128)
     }
 
     /// Set all DACs to ground maintaining current channel state
-    pub fn ground_all_fast(&mut self) -> Result<&mut Self, String> {
+    pub fn ground_all_fast(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(20_000u128)?;
@@ -647,13 +679,13 @@ impl Instrument {
     }
 
     /// Set global 3.3 V logic level
-    pub fn set_3v3_logic(&mut self) -> Result<&mut Self, String> {
+    pub fn set_3v3_logic(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*SET_3V3_LOGIC)?;
         self.load_dacs()
     }
 
     /// Update the DAC configuration
-    pub fn load_dacs(&mut self) -> Result<&mut Self, String> {
+    pub fn load_dacs(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*UPDATE_DAC)?;
         Ok(self)
     }
@@ -663,7 +695,7 @@ impl Instrument {
     /// f32::NAN. The function will panic if a channel number exceeding the highest
     /// channel (presently 63) is provided or if an invalid base address is selected.
     /// Base address must be a multiple of 256.
-    pub fn currents_from_address(&self, addr: u32, chans: &[usize]) -> Result<Vec<f32>, String> {
+    pub fn currents_from_address(&self, addr: u32, chans: &[usize]) -> Result<Vec<f32>, ArC2Error> {
 
         if addr % 256 != 0 {
             panic!("Attempted to read currents from invalid base address");
@@ -691,7 +723,7 @@ impl Instrument {
     /// Retrieve all wordline currents from specific address segment. This function will
     /// always return a 32-element vector. The function will panic if an invalid base
     /// address is provided. Base address must be a multiple of 256.
-    pub fn word_currents_from_address(&self, addr: u32) -> Result<Vec<f32>, String> {
+    pub fn word_currents_from_address(&self, addr: u32) -> Result<Vec<f32>, ArC2Error> {
 
         if addr % 256 != 0 {
             panic!("Attempted to read currents from invalid base address");
@@ -716,7 +748,7 @@ impl Instrument {
 
     /// Retrieve all bitline currents from specific address segment. This function will
     /// always return a 32-element vector.
-    pub fn bit_currents_from_address(&self, addr: u32) -> Result<Vec<f32>, String> {
+    pub fn bit_currents_from_address(&self, addr: u32) -> Result<Vec<f32>, ArC2Error> {
 
         if addr % 256 != 0 {
             panic!("Attempted to read currents from invalid base address");
@@ -742,7 +774,7 @@ impl Instrument {
     /// Common read functionality with one low channel and several high channels.
     /// This function is guaranteed never to flush the output.
     fn _read_slice_inner(&mut self, low: usize, highs: &[usize], vread: u16)
-        -> Result<Chunk, String> {
+        -> Result<Chunk, ArC2Error> {
 
         let zero: u16 = vidx!(0.0);
 
@@ -787,7 +819,7 @@ impl Instrument {
     /// Perform a current read between the specified channels. A voltage
     /// of `-vread` will be applied to the `low` channel and current will
     /// be read from the `high` channel.
-    pub fn read_one(&mut self, low: usize, high: usize, vread: f32) -> Result<f32, String> {
+    pub fn read_one(&mut self, low: usize, high: usize, vread: f32) -> Result<f32, ArC2Error> {
 
         // Reset DAC configuration
         self.reset_dacs()?;
@@ -809,7 +841,7 @@ impl Instrument {
     ///
     /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
     /// to a row read at `vread` in a standard 32×32 array, otherwise it's a column read.
-    pub fn read_slice(&mut self, chan: usize, vread: f32) -> Result<Vec<f32>, String> {
+    pub fn read_slice(&mut self, chan: usize, vread: f32) -> Result<Vec<f32>, ArC2Error> {
 
         // Reset DAC configuration
         self.reset_dacs()?;
@@ -846,7 +878,7 @@ impl Instrument {
     /// to a row read at `vread` in a standard 32×32 array, otherwise it's a column read.
     /// This is equivalent to read_slice but replaces channels not contained in the
     /// mask with `f32::NAN`.
-    pub fn read_slice_masked(&mut self, chan: usize, mask: &[usize], vread: f32) -> Result<Vec<f32>, String> {
+    pub fn read_slice_masked(&mut self, chan: usize, mask: &[usize], vread: f32) -> Result<Vec<f32>, ArC2Error> {
 
         // Reset DAC configuration
         self.reset_dacs()?;
@@ -900,7 +932,7 @@ impl Instrument {
     /// Same as [`Instrument::read_slice_masked`] but returning an [`Array`][`ndarray::Array`]
     /// for numpy compatibility
     pub fn read_slice_masked_as_ndarray(&mut self, chan: usize, mask: &[usize], vread: f32) ->
-        Result<Array<f32, Ix1>, String> {
+        Result<Array<f32, Ix1>, ArC2Error> {
 
         let data = self.read_slice_masked(chan, mask, vread)?;
         Ok(Array::from(data))
@@ -909,7 +941,7 @@ impl Instrument {
 
     /// Same as [`Instrument::read_slice`] but returning an [`Array`][`ndarray::Array`]
     /// for numpy compatibility
-    pub fn read_slice_as_ndarray(&mut self, chan: usize, vread: f32) -> Result<Array<f32, Ix1>, String> {
+    pub fn read_slice_as_ndarray(&mut self, chan: usize, vread: f32) -> Result<Array<f32, Ix1>, ArC2Error> {
 
         let data = self.read_slice(chan, vread)?;
 
@@ -925,7 +957,7 @@ impl Instrument {
     /// and `[48..64)` (wordlines). When order is `Rows` the low potential channels are
     /// `[0..16)` and `[32..48)` (bitlines). Function [`Instrument::read_slice()`] is
     /// applied for every one of the selected channels.
-    pub fn read_all(&mut self, vread: f32, order: BiasOrder) -> Result<Vec<f32>, String> {
+    pub fn read_all(&mut self, vread: f32, order: BiasOrder) -> Result<Vec<f32>, ArC2Error> {
 
         let mut results = Vec::with_capacity(32*32);
 
@@ -943,7 +975,7 @@ impl Instrument {
     }
 
     /// Same as [`Instrument::read_all()`] but represented as a 2D [`Array`][`ndarray::Array`].
-    pub fn read_all_as_ndarray(&mut self, vread: f32, order: BiasOrder) -> Result<Array<f32, Ix2>, String> {
+    pub fn read_all_as_ndarray(&mut self, vread: f32, order: BiasOrder) -> Result<Array<f32, Ix2>, ArC2Error> {
 
         let data = self.read_all(vread, order)?;
 
@@ -1037,7 +1069,7 @@ impl Instrument {
     /// is true the state of high speed drivers will be initialised before the actual pulsing
     /// sequence begins.
     pub fn pulse_one(&mut self, low: usize, high: usize, voltage: f32, nanos: u128, preset_state: bool)
-        -> Result<&mut Self, String> {
+        -> Result<&mut Self, ArC2Error> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
@@ -1055,7 +1087,7 @@ impl Instrument {
     /// to a row pulse, otherwise it's a column pulse. When `preset_state`
     /// is true the state of high speed drivers will be initialised before the actual pulsing
     /// sequence begins.
-    pub fn pulse_slice(&mut self, chan: usize, voltage: f32, nanos: u128, preset_state: bool) -> Result<&mut Self, String> {
+    pub fn pulse_slice(&mut self, chan: usize, voltage: f32, nanos: u128, preset_state: bool) -> Result<&mut Self, ArC2Error> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
@@ -1073,7 +1105,7 @@ impl Instrument {
     /// to a row pulse, otherwise it's a column pulse. When `preset_state`
     /// is true the state of high speed drivers will be initialised before the actual pulsing
     /// sequence begins.
-    pub fn pulse_slice_masked(&mut self, chan: usize, mask: &[usize], voltage: f32, nanos: u128, preset_state: bool) -> Result<&mut Self, String> {
+    pub fn pulse_slice_masked(&mut self, chan: usize, mask: &[usize], voltage: f32, nanos: u128, preset_state: bool) -> Result<&mut Self, ArC2Error> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
@@ -1097,7 +1129,7 @@ impl Instrument {
     /// by the High Speed drivers. No delays are introduced here as this will be
     /// handled either by a standard Delay instruction or a High Speed timer.
     fn _setup_dacs_for_pulsing(&mut self, config: &[(usize, usize, f32)], high_speed: bool, differential: bool)
-        -> Result<(), String> {
+        -> Result<(), ArC2Error> {
 
         // (idx, low, high); as required by SetDAC::from_channels().
         let mut channels: Vec<(u16, u16, u16)> = Vec::with_capacity(config.len()*2usize);
@@ -1147,7 +1179,7 @@ impl Instrument {
     /// Pulse a crosspoint using conventional biasing and delaying. This function
     /// will *NOT* automatically flush output.
     fn pulse_one_slow(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
-        -> Result<&mut Self, String> {
+        -> Result<&mut Self, ArC2Error> {
 
         // set high and low channels as HS drivers
         let mut bias_conf = ChannelConf::new();
@@ -1168,7 +1200,7 @@ impl Instrument {
     /// Pulse a crosspoint using the high speed drivers. This function will *NOT*
     /// automatically flush output.
     fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128, preset_state: bool)
-        -> Result<&mut Self, String> {
+        -> Result<&mut Self, ArC2Error> {
 
         // set high and low channels as HS drivers
         let mut bias_conf = ChannelConf::new();
@@ -1226,7 +1258,7 @@ impl Instrument {
     }
 
     fn pulse_slice_slow(&mut self, chan: usize, voltage: f32, nanos: u128, mask: Option<&[usize]>) ->
-        Result<&mut Self, String> {
+        Result<&mut Self, ArC2Error> {
 
         let mut bias_conf = ChannelConf::new();
 
@@ -1264,7 +1296,7 @@ impl Instrument {
     }
 
     fn pulse_slice_fast(&mut self, chan: usize, voltage: f32, nanos: u128, mask: Option<&[usize]>, preset_state:bool) ->
-        Result<&mut Self, String> {
+        Result<&mut Self, ArC2Error> {
 
         let mut bias_conf = ChannelConf::new();
 
@@ -1364,7 +1396,7 @@ impl Instrument {
     ///
     /// This function will pulse available crosspoints on the array. This can be done
     /// either by high biasing the rows ([`BiasOrder::Rows`]) or columns ([`BiasOrder::Columns`]).
-    pub fn pulse_all(&mut self, voltage: f32, nanos: u128, order: BiasOrder, preset_state: bool) -> Result<&mut Self, String> {
+    pub fn pulse_all(&mut self, voltage: f32, nanos: u128, order: BiasOrder, preset_state: bool) -> Result<&mut Self, ArC2Error> {
 
         let bias_channels = match order {
             BiasOrder::Rows => &*ALL_WORDS,
@@ -1389,7 +1421,7 @@ impl Instrument {
     /// Pulse and immediately read a crosspoint. Semantics and arguments follow the same
     /// conventions as [`Instrument::read_one`] and [`Instrument::pulse_one'].
     pub fn pulseread_one(&mut self, low: usize, high: usize, vpulse: f32, nanos: u128,
-        vread: f32) -> Result<f32, String> {
+        vread: f32) -> Result<f32, ArC2Error> {
 
         if nanos < 500_000_000u128 {
             // For fast pulse+read we need to use the fast variant of grounding which
@@ -1431,7 +1463,7 @@ impl Instrument {
 
     /// Pulse and read a slice. Semantics and arguments follow the same conventions as
     /// [`Instrument::read_slice`] and [`Instrument::pulse_slice`];
-    pub fn pulseread_slice(&mut self, chan: usize, vpulse: f32, nanos: u128, vread: f32) -> Result<Vec<f32>, String> {
+    pub fn pulseread_slice(&mut self, chan: usize, vpulse: f32, nanos: u128, vread: f32) -> Result<Vec<f32>, ArC2Error> {
 
         let mode: DataMode;
         let channels: &Vec<usize>;
@@ -1464,14 +1496,14 @@ impl Instrument {
     /// Pulse and read a slice but returning an [`Array`][`ndarray::Array`] for
     /// numpy compatibility
     pub fn pulseread_slice_as_ndarray(&mut self, chan: usize, vpulse: f32,
-        nanos: u128, vread: f32) -> Result<Array<f32, Ix1>, String> {
+        nanos: u128, vread: f32) -> Result<Array<f32, Ix1>, ArC2Error> {
         let data = self.pulseread_slice(chan, vpulse, nanos, vread)?;
         Ok(Array::from(data))
     }
 
     /// Pulse and immediately read all crosspoints. Semantics and arguments follow the same
     /// conventions as [`Instrument::read_all`] and [`Instrument::pulse_all'].
-    pub fn pulseread_all(&mut self, vpulse: f32, nanos: u128, vread: f32, order: BiasOrder) -> Result<Vec<f32>, String> {
+    pub fn pulseread_all(&mut self, vpulse: f32, nanos: u128, vread: f32, order: BiasOrder) -> Result<Vec<f32>, ArC2Error> {
 
         let mode: DataMode;
         let bias_channels: &Vec<usize>;
@@ -1526,7 +1558,7 @@ impl Instrument {
     /// Pulse and read all crosspoints but returning an [`Array`][`ndarray::Array`]
     /// for numpy compatibility
     pub fn pulseread_all_as_ndarray(&mut self, vpulse: f32, nanos: u128,
-        vread: f32, order: BiasOrder) -> Result<Array<f32, Ix2>, String> {
+        vread: f32, order: BiasOrder) -> Result<Array<f32, Ix2>, ArC2Error> {
 
         let data = self.pulseread_all(vpulse, nanos, vread, order)?;
         Ok(Array::from_shape_vec((32, 32), data).unwrap())
@@ -1536,7 +1568,7 @@ impl Instrument {
     /// Semantics and arguments follow the same conventions as [`Instrument::read_slice_masked`]
     /// and [`Instrument::pulse_slice_masked`].
     pub fn pulseread_slice_masked(&mut self, chan: usize, mask: &[usize], vpulse: f32,
-        nanos: u128, vread: f32) -> Result<Vec<f32>, String> {
+        nanos: u128, vread: f32) -> Result<Vec<f32>, ArC2Error> {
 
         let all_channels: &Vec<usize>;
         let all_channels_set: &HashSet<usize>;
@@ -1582,7 +1614,7 @@ impl Instrument {
     /// Pulse and read the specified high channels that have `chan` as the low potential channel,
     /// returning an ndarray for numpy compatibility
     pub fn pulseread_slice_masked_as_ndarray(&mut self, chan: usize, mask: &[usize], vpulse: f32,
-        nanos: u128, vread: f32) -> Result<Array<f32, Ix1>, String> {
+        nanos: u128, vread: f32) -> Result<Array<f32, Ix1>, ArC2Error> {
         let data = self.pulseread_slice_masked(chan, mask, vpulse, nanos, vread)?;
         Ok(Array::from(data))
     }
@@ -1592,7 +1624,7 @@ impl Instrument {
     /// This can be set either to internal or header-controlled. For the 32NAA daughterboard
     /// the first scenario routes channels to the internal PLCC socket and the second to
     /// the on-board headers.
-    pub fn set_control_mode(&mut self, mode: ControlMode) -> Result<&mut Self, String> {
+    pub fn set_control_mode(&mut self, mode: ControlMode) -> Result<&mut Self, ArC2Error> {
 
         let mut iologic = match mode {
             ControlMode::Internal => UpdateLogic::new(false, true),
@@ -1610,12 +1642,12 @@ impl Instrument {
         pw_nanos: u128, inter_nanos: u128,
         num_pulses: usize,
         read_at: ReadAt, read_after: ReadAfter) ->
-        Result<&mut Self, String> {
+        Result<&mut Self, ArC2Error> {
 
 
         // helper function for reads
         fn __do_read(slf: &mut Instrument, low: usize, high: usize, read_at: &ReadAt,
-            bias_voltage: f32) -> Result<Chunk, String> {
+            bias_voltage: f32) -> Result<Chunk, ArC2Error> {
 
             let chunk = match read_at {
                 ReadAt::Bias => {
@@ -1636,7 +1668,7 @@ impl Instrument {
         }
 
         // helper function for interpulse waits
-        fn __inter_wait(slf: &mut Instrument, nanos: u128) -> Result<(), String> {
+        fn __inter_wait(slf: &mut Instrument, nanos: u128) -> Result<(), ArC2Error> {
 
             // if there's no interpulse just exit quickly
             if nanos > 0u128 {
@@ -1648,9 +1680,7 @@ impl Instrument {
 
         // Check if voltage ramp is described correctly
         if vstop < vstart && vstep >= 0.0 {
-            return Err(format!(
-                "Invalid ramp voltages: Vstart: {}, Vstop: {}, Vstep: {}",
-                vstart, vstop, vstep));
+            return Err(ArC2Error::RampOperationError(vstart, vstop, vstep));
         }
 
         // make the voltage list
@@ -1671,7 +1701,7 @@ impl Instrument {
                         let chunk = __do_read(self, low, high, &read_at, *v)?;
                         match sender.send(Some(chunk)) {
                             Ok(()) => {},
-                            Err(err) => { return Err(format!("Send error: {:?}", err)); }
+                            Err(err) => { return Err(ArC2Error::from(err)); }
                         }
                     },
                     _ => { eprintln!("RMP: read-only ramp without ReadAfter::Pulse!!"); }
@@ -1719,7 +1749,7 @@ impl Instrument {
                 let chunk = __do_read(self, low, high, &read_at, *v)?;
                 match sender.send(Some(chunk)) {
                     Ok(()) => {},
-                    Err(err) => { return Err(format!("Send error: {:?}", err)); }
+                    Err(err) => { return Err(ArC2Error::from(err)); }
                 }
 
                 // if there's interpulse remove bias and wait
@@ -1734,7 +1764,7 @@ impl Instrument {
             let chunk = __do_read(self, low, high, &read_at, *voltage)?;
             match sender.send(Some(chunk)) {
                 Ok(()) => {},
-                Err(err) => { return Err(format!("Send error: {:?}", err)); }
+                Err(err) => { return Err(ArC2Error::from(err)); }
             }
         };
 
@@ -1742,7 +1772,7 @@ impl Instrument {
     }
 
     /// Read one block of values from the internal buffer
-    pub fn pick_one(&mut self, mode: DataMode) -> Result<Option<Vec<f32>>, String> {
+    pub fn pick_one(&mut self, mode: DataMode) -> Result<Option<Vec<f32>>, ArC2Error> {
         let _receiver = self._receiver.clone();
         let receiver = _receiver.lock().unwrap();
 

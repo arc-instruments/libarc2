@@ -6,12 +6,12 @@
 //! trait that converts them into a serialisable `Vec<u32>`. This can be
 //! then be processed by ArC2.
 
-use std::convert::TryFrom;
 use std::time::Duration;
 use num_derive::{FromPrimitive, ToPrimitive};
 use bitvec::prelude::*;
 use bitflags::bitflags;
 use num_traits::{FromPrimitive};
+use thiserror::Error;
 
 mod wordreg {
 
@@ -103,6 +103,12 @@ pub(crate) mod consts {
 
     pub(super) const CHANCONFSIZE: usize = 2;
     pub(super) const NCHANS: usize = 64;
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum Error {
+    #[error("Supplied slice is too small")]
+    SliceTooSmall
 }
 
 
@@ -779,12 +785,12 @@ impl ChannelState {
 
     }
 
-    fn from_bitslice(bools: &BitSlice<Msb0, u32>) -> Result<ChannelState, String> {
+    fn from_bitslice(bools: &BitSlice<Msb0, u32>) -> Result<ChannelState, Error> {
 
         let len: usize;
 
         if bools.len() < consts::CHANCONFSIZE {
-            return Err(String::from("Supplied slice is too small"));
+            return Err(Error::SliceTooSmall);
         }
 
         if bools.len() > 8 {
@@ -808,15 +814,6 @@ impl ChannelState {
 impl From<&[bool; consts::CHANCONFSIZE]> for ChannelState {
     fn from(bools: &[bool; consts::CHANCONFSIZE]) -> ChannelState {
         ChannelState::from_bools(&bools)
-    }
-}
-
-impl TryFrom<&BitSlice<Msb0, u32>> for ChannelState {
-
-    type Error = String;
-
-    fn try_from(v: &BitSlice<Msb0, u32>) -> Result<Self, Self::Error> {
-        ChannelState::from_bitslice(v)
     }
 }
 
@@ -918,7 +915,7 @@ impl ChannelConf {
 
         let v = &self.bits[from..to];
 
-        ChannelState::try_from(v).unwrap()
+        ChannelState::from_bitslice(v).unwrap()
     }
 
     /// Get the number of allocated channels
