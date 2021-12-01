@@ -595,9 +595,15 @@ impl Instrument {
         let _memman = self.memman.clone();
         let mut memman = _memman.write().unwrap();
         memman.free_chunk(chunk)?;
+
         /*
          * TODO: Zero offset flag when this is supported by the FPGA
          */
+        #[cfg(feature="flag_addresses")] {
+            let _efm = self.efm.clone();
+            let efm = _efm.lock().unwrap();
+            efm.write_register(chunk.flag_addr(), 0x0)?;
+        }
 
         Ok(ret)
     }
@@ -808,7 +814,7 @@ impl Instrument {
             Err(err) => { eprintln!("Zeroing chunk at {} failed: {}", chunk.addr(), err) }
         };
 
-        let mut currentread = CurrentRead::new(&adcmask, chunk.addr());
+        let mut currentread = CurrentRead::new(&adcmask, chunk.addr(), chunk.flag_addr());
         self.process(currentread.compile())?;
         self.add_delay(1_000u128)?;
 

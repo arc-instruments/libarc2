@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 
 const CHUNK_SIZE: usize = 256; // 64 words per chunk
 const MEM_SIZE: usize = 1024*1024*1024; // 1GiB of onboard memory
+const FLAG_BASE: u32 = 0x7800_0000; // 2GiB - 128MiB
 const DRAM_BASE: u32 = 0x0000_0000;
 
 
@@ -75,8 +76,15 @@ impl Chunk {
         self._addr
     }
 
-    pub fn offset(&self) -> u32 {
+    fn offset(&self) -> u32 {
         self._addr / (CHUNK_SIZE as u32)
+    }
+
+    /// The associated flag address, raised when the operation
+    /// associated with this address is finished
+    pub fn flag_addr(&self) -> u32 {
+        let offset = self.offset();
+        return FLAG_BASE + 4*offset;
     }
 
     /// Returns `true` if the data is still active, as in not

@@ -728,10 +728,10 @@ impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
 /// ## Instruction layout
 ///
 /// ```text
-///        +--------+----------+---------+
-///        | OpCode | ChanMask | Address |
-///        +--------+----------+---------+
-/// Words:     1         2         1
+///        +--------+----------+---------+-------------+
+///        | OpCode | ChanMask | Address | FlagAddress |
+///        +--------+----------+---------+-------------+
+/// Words:     1         2         1            1
 /// ```
 ///
 /// ## Example
@@ -746,10 +746,10 @@ impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
 /// mask.set_enabled(0, true);
 /// mask.set_enabled(62, true);
 ///
-/// let mut instr = CurrentRead::new(&mask, 0x60000000);
+/// let mut instr = CurrentRead::new(&mask, 0x60000000, 0x78000000);
 ///
 /// assert_eq!(instr.compile().view(), &[0x4, 0x40000000, 0x80000001,
-///     0x60000000, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+///     0x60000000, 0x78000000, 0x0, 0x0, 0x0, 0x80008000]);
 /// ```
 pub struct CurrentRead {
     instrs: Vec<u32>
@@ -758,11 +758,12 @@ pub struct CurrentRead {
 impl CurrentRead {
 
     /// Create a new current read instruction
-    pub fn new(channels: &ChanMask, addr: u32) -> Self {
+    pub fn new(channels: &ChanMask, addr: u32, flag_addr: u32) -> Self {
         let mut instr = Self::create();
         instr.push_register(&OpCode::CurrentRead);
         instr.push_register(channels);
         instr.push_register(&Address::new(addr));
+        instr.push_register(&Address::new(flag_addr));
         instr
     }
 
@@ -780,10 +781,10 @@ impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
 /// ## Instruction layout
 ///
 /// ```text
-///        +--------+---------+-----------+---------+
-///        | OpCode | ChanMask | Averaging | Address |
-///        +--------+---------+-----------+---------+
-/// Words:     1         2          1          1
+///        +--------+---------+-----------+----------+-------------+
+///        | OpCode | ChanMask | Averaging | Address | FlagAddress |
+///        +--------+---------+-----------+----------+-------------+
+/// Words:     1         2          1          1            1
 /// ```
 ///
 /// ## Example
@@ -798,10 +799,10 @@ impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
 /// mask.set_enabled(0, true);
 /// mask.set_enabled(62, true);
 ///
-/// let mut instr = VoltageRead::new(&mask, true, 0x60000000);
+/// let mut instr = VoltageRead::new(&mask, true, 0x60000000, 0x78000000);
 ///
 /// assert_eq!(instr.compile().view(), &[0x8, 0x40000000, 0x80000001,
-///     0x1, 0x60000000, 0x0, 0x0, 0x0, 0x80008000]);
+///     0x1, 0x60000000, 0x78000000, 0x0, 0x0, 0x80008000]);
 /// ```
 pub struct VoltageRead {
     instrs: Vec<u32>
@@ -810,7 +811,7 @@ pub struct VoltageRead {
 impl VoltageRead {
 
     /// Create a new voltage read instruction
-    pub fn new(channels: &ChanMask, averaging: bool, addr: u32) -> Self {
+    pub fn new(channels: &ChanMask, averaging: bool, addr: u32, flag_addr: u32) -> Self {
         let mut instr = Self::create();
         instr.push_register(&OpCode::VoltageRead);
         instr.push_register(channels);
@@ -820,6 +821,7 @@ impl VoltageRead {
             instr.push_register(&Averaging::Disabled);
         }
         instr.push_register(&Address::new(addr));
+        instr.push_register(&Address::new(flag_addr));
         instr
     }
 
@@ -1300,17 +1302,17 @@ mod tests {
         mask.set_enabled(62, true);
 
 
-        let mut instr = CurrentRead::new(&mask, 0x60000000);
+        let mut instr = CurrentRead::new(&mask, 0x60000000, 0x78000000);
 
         assert_eq!(instr.compile().view(), &[0x4, 0x40000000, 0x80000001,
-            0x60000000, 0x0, 0x0, 0x0, 0x0, 0x80008000]);
+            0x60000000, 0x78000000, 0x0, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
             &[0x04, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x40,
               0x01, 0x00, 0x00, 0x80,
               0x00, 0x00, 0x00, 0x60,
-              0x00, 0x00, 0x00, 0x00,
+              0x00, 0x00, 0x00, 0x78,
               0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00,
@@ -1325,10 +1327,10 @@ mod tests {
         mask.set_enabled(0, true);
         mask.set_enabled(62, true);
 
-        let mut instr = VoltageRead::new(&mask, true, 0x60000000);
+        let mut instr = VoltageRead::new(&mask, true, 0x60000000, 0x78000000);
 
         assert_eq!(instr.compile().view(), &[0x8, 0x40000000, 0x80000001,
-            0x1, 0x60000000, 0x0, 0x0, 0x0, 0x80008000]);
+            0x1, 0x60000000, 0x78000000, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
             &[0x08, 0x00, 0x00, 0x00,
@@ -1336,7 +1338,7 @@ mod tests {
               0x01, 0x00, 0x00, 0x80,
               0x01, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x60,
-              0x00, 0x00, 0x00, 0x00,
+              0x00, 0x00, 0x00, 0x78,
               0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00,
               0x00, 0x80, 0x00, 0x80]);

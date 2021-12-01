@@ -31,6 +31,8 @@ serial_test = "0.4"
 assert_matches = "1.5"
 
 [features]
+# enable flag addresses to check data validity
+flag_addresses = []
 # enable this to run hardware tests with cargo test
 hardware_tests = []
 # enable this to print out raw packets to stderr
