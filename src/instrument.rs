@@ -21,6 +21,7 @@ const WRITEDELAY: time::Duration = time::Duration::from_nanos(2_500_000);
 const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
 const INBUF: usize = 64*std::mem::size_of::<u32>();
+const VALUEAVAILFLAG: u32 = 0xcafebabe;
 const INSTRCAP: usize = 768*9*std::mem::size_of::<u32>();
 
 // We are caching common instructions
@@ -602,7 +603,8 @@ impl Instrument {
         #[cfg(feature="flag_addresses")] {
             let _efm = self.efm.clone();
             let efm = _efm.lock().unwrap();
-            efm.write_register(chunk.flag_addr(), 0x0)?;
+            // clear flag
+            efm.write_block(chunk.flag_addr(), &mut [0x0, 0x0, 0x0, 0x0], BLFLAGS_W)?;
         }
 
         Ok(ret)
@@ -814,7 +816,8 @@ impl Instrument {
             Err(err) => { eprintln!("Zeroing chunk at {} failed: {}", chunk.addr(), err) }
         };
 
-        let mut currentread = CurrentRead::new(&adcmask, chunk.addr(), chunk.flag_addr());
+        let mut currentread = CurrentRead::new(&adcmask, chunk.addr(),
+            chunk.flag_addr(), VALUEAVAILFLAG);
         self.process(currentread.compile())?;
         self.add_delay(1_000u128)?;
 
@@ -1044,6 +1047,37 @@ impl Instrument {
             let wait = std::time::Duration::from_nanos(10u64.pow(exponent) * 1000u64);
             std::thread::sleep(wait);
         }
+    }
+
+    /// Wait until the value specified by the chunk is populated. This will
+    /// be typically done at the end of a read procedure. The function will
+    /// return once this is done and it is using a similar polling procedure
+    /// as [`Instrument::wait()`].
+    #[cfg(feature="flag_addresses")]
+    fn wait_for_flag(&mut self, chunk: &Chunk) -> Result<(), ArC2Error> {
+
+        let mut counter: u64 = 0;
+        let mut exponent: u32 = 0;
+
+        loop {
+            if self.value_available(&chunk)? {
+                return Ok(())
+            }
+
+            // limit maximum polling to 100 ms
+            if exponent < 5 {
+                if counter == 9 {
+                    counter = 0;
+                    exponent += 1;
+                } else {
+                    counter += 1;
+                }
+            }
+
+            let wait = std::time::Duration::from_nanos(10u64.pow(exponent) * 1000u64);
+            std::thread::sleep(wait);
+        }
+
     }
 
     // Variant of wait for internal use when a lock to a bl::Device has already
@@ -1805,13 +1839,31 @@ impl Instrument {
         if chunk_opt.is_some() {
             let mut chunk = chunk_opt.unwrap();
 
+            #[cfg(feature="flag_addresses")]
+            self.wait_for_flag(&chunk);
+
             match self.read_chunk(&mut chunk, &mode) {
-                Ok(v) => Ok(Some(v)),
+                Ok(v) => {
+                    return Ok(Some(v));
+
+                },
                 Err(e) => Err(e)
             }
         } else {
             Ok(None)
         }
+    }
+
+    /// Check if the value of the chunk is actually available
+    #[cfg(feature="flag_addresses")]
+    fn value_available(&mut self, chunk: &Chunk) -> Result<bool, ArC2Error> {
+        let _efm = self.efm.clone();
+        let efm = _efm.lock().unwrap();
+
+        let data = efm.read_register(chunk.flag_addr())?;
+
+        Ok(data == VALUEAVAILFLAG)
+
     }
 
 }
