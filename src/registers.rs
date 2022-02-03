@@ -371,7 +371,7 @@ impl ClusterMask {
 /// assert_eq!(delay.as_u32s(), [0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x6000001e]);
 /// ```
 pub struct HSDelay {
-    bits: BitVec<Msb0, u32>
+    bits: BitVec<u32, Msb0>
 }
 
 impl HSDelay {
@@ -774,18 +774,18 @@ impl ChannelState {
     }
 
     fn from_bools(bools: &[bool; consts::CHANCONFSIZE]) -> ChannelState {
-        let mut bitarr = bitarr![Msb0, u8; 0; 8];
+        let mut bitarr = bitarr![u8, Msb0; 0; 8];
 
         for i in 0..consts::CHANCONFSIZE {
            bitarr.set(8-consts::CHANCONFSIZE+i, bools[i])
         }
 
-        let value: [u8; 1] = bitarr.value();
+        let value: &[u8] = bitarr.as_raw_slice();
         ChannelState::from_u8(value[0] as u8).unwrap()
 
     }
 
-    fn from_bitslice(bools: &BitSlice<Msb0, u32>) -> Result<ChannelState, Error> {
+    fn from_bitslice(bools: &BitSlice<u32, Msb0>) -> Result<ChannelState, Error> {
 
         let len: usize;
 
@@ -799,13 +799,13 @@ impl ChannelState {
             len = bools.len()
         }
 
-        let mut bitarr = bitarr![Msb0, u8; 0; 8];
+        let mut bitarr = bitarr![u8, Msb0; 0; 8];
 
         for i in 0..len {
            bitarr.set(8-len+i, bools[i])
         }
 
-        let value: [u8; 1] = bitarr.value();
+        let value: &[u8] = bitarr.as_raw_slice();
         Ok(ChannelState::from_u8(value[0] as u8).unwrap())
     }
 
@@ -871,7 +871,7 @@ impl From<&[bool; consts::CHANCONFSIZE]> for ChannelState {
 /// }
 /// ```
 pub struct ChannelConf {
-    bits: BitVec<Msb0, u32>,
+    bits: BitVec<u32, Msb0>,
 }
 
 impl ChannelConf {
@@ -882,7 +882,7 @@ impl ChannelConf {
     pub fn new() -> ChannelConf {
         // CHANSIZE bits for each channel
         let size = consts::NCHANS * consts::CHANCONFSIZE;
-        let vec: BitVec<Msb0, u32> = BitVec::repeat(false, size);
+        let vec: BitVec<u32, Msb0> = BitVec::repeat(false, size);
 
         ChannelConf { bits: vec }
     }
@@ -1086,7 +1086,7 @@ pub enum CurrentSourceState {
 /// There are two things that are specified by this register. The
 /// *output digipot* and the state of the *current source*.
 pub struct SourceConf {
-    bits: BitVec<Msb0, u32>
+    bits: BitVec<u32, Msb0>
 }
 
 impl SourceConf {
@@ -1095,7 +1095,7 @@ impl SourceConf {
     /// initialise the digipot to a safe value (`0x1CD` or roughly
     /// 11 kΩ).
     pub fn new() -> SourceConf {
-        let mut vec: BitVec<Msb0, u32> = BitVec::repeat(false, 32);
+        let mut vec: BitVec<u32, Msb0> = BitVec::repeat(false, 32);
         let bits = vec.as_mut_bitslice();
         bits[0..10].store(0x1CD as u16);
 
@@ -1350,7 +1350,7 @@ mod dacvoltage_tests {
 /// A generic bitmask of the specified word size
 pub struct U32Mask<T> {
     _words: T,
-    bits: BitVec<Msb0, u32>,
+    bits: BitVec<u32, Msb0>,
 }
 
 
@@ -1406,28 +1406,28 @@ impl<T: wordreg::WordSize> ToU32s for U32Mask<T> {
 
 impl U32Mask<wordreg::Wx1> {
     pub fn new() -> U32Mask<wordreg::Wx1> {
-        let vec: BitVec<Msb0, u32> = BitVec::repeat(false, wordreg::Wx1::WORDS*32);
+        let vec: BitVec<u32, Msb0> = BitVec::repeat(false, wordreg::Wx1::WORDS*32);
         U32Mask { _words: wordreg::Wx1{}, bits: vec }
     }
 }
 
 impl U32Mask<wordreg::Wx2> {
     pub fn new() -> U32Mask<wordreg::Wx2> {
-        let vec: BitVec<Msb0, u32> = BitVec::repeat(false, wordreg::Wx2::WORDS*32);
+        let vec: BitVec<u32, Msb0> = BitVec::repeat(false, wordreg::Wx2::WORDS*32);
         U32Mask { _words: wordreg::Wx2{}, bits: vec }
     }
 }
 
 impl U32Mask<wordreg::Wx3> {
     pub fn new() -> U32Mask<wordreg::Wx3> {
-        let vec: BitVec<Msb0, u32> = BitVec::repeat(false, wordreg::Wx3::WORDS*32);
+        let vec: BitVec<u32, Msb0> = BitVec::repeat(false, wordreg::Wx3::WORDS*32);
         U32Mask { _words: wordreg::Wx3{}, bits: vec }
     }
 }
 
 impl U32Mask<wordreg::Wx4> {
     pub fn new() -> U32Mask<wordreg::Wx4> {
-        let vec: BitVec<Msb0, u32> = BitVec::repeat(false, wordreg::Wx4::WORDS*32);
+        let vec: BitVec<u32, Msb0> = BitVec::repeat(false, wordreg::Wx4::WORDS*32);
         U32Mask { _words: wordreg::Wx4{}, bits: vec }
     }
 }
@@ -1647,7 +1647,7 @@ mod iomask_tests {
 /// assert_eq!(all_outputs.as_u32s(), &[0xf]);
 /// ```
 pub struct IOEnable {
-    bits: BitVec<Lsb0, u32>,
+    bits: BitVec<u32, Lsb0>,
 }
 
 impl IOEnable {
@@ -1655,7 +1655,7 @@ impl IOEnable {
 
     /// Create a new `IOEnable`. IOs are OFF and set as outputs
     pub fn new() -> IOEnable {
-        let vec: BitVec<Lsb0, u32> = BitVec::repeat(false, Self::LEN);
+        let vec: BitVec<u32, Lsb0> = BitVec::repeat(false, Self::LEN);
         let mut io = IOEnable { bits: vec };
         io.set_all_outputs(true);
 
@@ -1667,7 +1667,7 @@ impl IOEnable {
 
     /// Create a new `IOEnable` with all IOs enabled and set to output
     pub fn all_output() -> IOEnable {
-        let vec: BitVec<Lsb0, u32> = BitVec::repeat(false, Self::LEN);
+        let vec: BitVec<u32, Lsb0> = BitVec::repeat(false, Self::LEN);
         let mut io = IOEnable { bits: vec };
         io.set_all_outputs(true);
 
@@ -1676,7 +1676,7 @@ impl IOEnable {
 
     /// Create a new `IOEnable` with all IOs enabled and set to input
     pub fn all_input() -> IOEnable {
-        let vec: BitVec<Lsb0, u32> = BitVec::repeat(false, Self::LEN);
+        let vec: BitVec<u32, Lsb0> = BitVec::repeat(false, Self::LEN);
         let mut io = IOEnable { bits: vec };
         io.set_all_outputs(false);
 
