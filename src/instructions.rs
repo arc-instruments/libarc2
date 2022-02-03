@@ -714,6 +714,16 @@ impl UpdateLogic {
         instr.push_register(ioenable);
         instr
     }
+
+    /// Create a new output instruction from registers. This is
+    /// essentially [`with_regs`][`UpdateLogic::with_regs`] but
+    /// with all channels set as output.
+    pub fn with_regs_output(mask: &IOMask, enable: bool) -> Self {
+        let mut ioenable = IOEnable::new();
+        ioenable.set_enabled(enable);
+
+        Self::with_regs(&mask, &ioenable)
+    }
 }
 
 impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }

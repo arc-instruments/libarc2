@@ -1398,6 +1398,21 @@ impl<T: wordreg::WordSize> U32Mask<T> {
 
 }
 
+// Used to create the `from_vals` function of U32Mask<T>
+macro_rules! make_from_values_impl {
+    ($ws:ty, $wx:expr) => {
+        /// Create a new [`U32Mask`] from a series of `u32s`.
+        pub fn from_vals(vals: &[u32]) -> U32Mask<$ws> {
+            let mut vec: BitVec<u32, Msb0> = BitVec::repeat(false, <$ws>::WORDS*32);
+            for idx in 0..vals.len() {
+                vec[idx*32..(idx+1)*32].store::<u32>(vals[idx]);
+            }
+
+            U32Mask { _words: $wx, bits: vec }
+        }
+    }
+}
+
 impl<T: wordreg::WordSize> ToU32s for U32Mask<T> {
     fn as_u32s(&self) -> Vec<u32> {
         self.bits.as_raw_slice().to_vec()
@@ -1409,6 +1424,8 @@ impl U32Mask<wordreg::Wx1> {
         let vec: BitVec<u32, Msb0> = BitVec::repeat(false, wordreg::Wx1::WORDS*32);
         U32Mask { _words: wordreg::Wx1{}, bits: vec }
     }
+
+    make_from_values_impl!(wordreg::Wx1, wordreg::Wx1{});
 }
 
 impl U32Mask<wordreg::Wx2> {
@@ -1416,6 +1433,8 @@ impl U32Mask<wordreg::Wx2> {
         let vec: BitVec<u32, Msb0> = BitVec::repeat(false, wordreg::Wx2::WORDS*32);
         U32Mask { _words: wordreg::Wx2{}, bits: vec }
     }
+
+    make_from_values_impl!(wordreg::Wx2, wordreg::Wx2{});
 }
 
 impl U32Mask<wordreg::Wx3> {
@@ -1423,6 +1442,8 @@ impl U32Mask<wordreg::Wx3> {
         let vec: BitVec<u32, Msb0> = BitVec::repeat(false, wordreg::Wx3::WORDS*32);
         U32Mask { _words: wordreg::Wx3{}, bits: vec }
     }
+
+    make_from_values_impl!(wordreg::Wx3, wordreg::Wx3{});
 }
 
 impl U32Mask<wordreg::Wx4> {
@@ -1430,6 +1451,8 @@ impl U32Mask<wordreg::Wx4> {
         let vec: BitVec<u32, Msb0> = BitVec::repeat(false, wordreg::Wx4::WORDS*32);
         U32Mask { _words: wordreg::Wx4{}, bits: vec }
     }
+
+    make_from_values_impl!(wordreg::Wx4, wordreg::Wx4{});
 }
 
 
@@ -1598,6 +1621,18 @@ mod iomask_tests {
         v.set_enabled(0, true);
 
         assert_eq!(&v.as_u32s(), &[0x80000001]);
+
+    }
+
+    #[test]
+    fn from_vals() {
+        let mut v = IOMask::from_vals(&[0x80000001]);
+
+        assert_eq!(&v.as_u32s(), &[0x80000001]);
+        assert_eq!(v.get_enabled(31), true);
+        assert_eq!(v.get_enabled(0), true);
+        v.set_enabled(1, true);
+        assert_eq!(&v.as_u32s(), &[0x80000003]);
 
     }
 

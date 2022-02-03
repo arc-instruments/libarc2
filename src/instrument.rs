@@ -8,7 +8,7 @@ use ndarray::{Array, Ix1, Ix2};
 use thiserror::Error;
 
 use crate::instructions::*;
-use crate::registers::{ChannelState, ChanMask};
+use crate::registers::{ChannelState, ChanMask, IOMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
 use crate::registers::consts::HSCLUSTERMAP;
 use crate::memory::{MemMan, Chunk, MemoryError};
@@ -1672,6 +1672,17 @@ impl Instrument {
         };
 
         self.process(iologic.compile())?;
+
+        Ok(self)
+    }
+
+    /// Configures the digital I/Os to the specified levels. The I/Os can only be
+    /// configured as outputs for now, so the bitmask essentially switches the
+    /// digital outputs as low/high.
+    pub fn set_logic(&mut self, mask: &IOMask, enable: bool) -> Result<&mut Self, ArC2Error> {
+
+        let mut instr = UpdateLogic::with_regs_output(&mask, enable);
+        self.process(instr.compile())?;
 
         Ok(self)
     }
