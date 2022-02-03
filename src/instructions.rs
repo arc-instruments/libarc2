@@ -36,7 +36,7 @@ macro_rules! make_vec_instr_impl {
 
 macro_rules! dacvoltage {
     ($low: expr, $high: expr) => {
-        (($high as u32) << 16) | (($low as u32) & 0xFFFF);
+        (($high as u32) << 16) | (($low as u32) & 0xFFFF)
     }
 }
 
