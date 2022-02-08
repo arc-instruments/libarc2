@@ -579,6 +579,65 @@ impl UpdateChannel {
 impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs); }
 
 
+/// Modify a channel with respect to ground
+///
+/// The `ModifyChannel` instruction will set the connections of the 64 channels with
+/// respect to ground. The instruction can connect channels to GND, cap GND or the
+/// current source.
+///
+/// ## Instruction layout
+///
+/// ```text
+///                             GND      Cap GND    Cur Src
+///        +--------+-------+----------+----------+----------+
+///        | OpCode | Empty | ChanMask | ChanMask | ChanMask |
+///        +--------+-------+----------+----------+----------+
+/// Words:     1        1        2          2          2
+/// ```
+///
+/// ## Example
+/// ```
+/// use libarc2::registers::ChanMask;
+/// use libarc2::instructions::{Instruction, ModifyChannel};
+///
+/// // Do any Update Channel operations here
+///
+/// let mut chan_gnd = ChanMask::new();
+/// let mut chan_capgnd = ChanMask::new();
+/// let mut chan_cursrc = ChanMask::new();
+///
+/// // Set channel #0 to GND
+/// chan_gnd.set_enabled(0, true);
+/// // Set channel #1 to Cap GND
+/// chan_capgnd.set_enabled(1, true);
+/// // Connect channel #2 to the current source
+/// chan_cursrc.set_enabled(2, true);
+///
+/// let mut instr = ModifyChannel::from_masks(&chan_gnd, &chan_capgnd, &chan_cursrc);
+///
+/// assert_eq!(instr.compile().view(), &[0x400, 0x0,
+///     0x0, 0x1, 0x0, 0x2, 0x0, 0x4, 0x80008000]);
+/// ```
+pub struct ModifyChannel {
+    instrs: Vec<u32>
+}
+
+impl ModifyChannel {
+
+    pub fn new() -> Self {
+        Self::from_registers(&[&OpCode::ModifyChannel,
+            &Empty::new(), &ChanMask::new(),
+            &ChanMask::new(), &ChanMask::new() ])
+    }
+
+    pub fn from_masks(gnd: &ChanMask, capgnd: &ChanMask, cursrc: &ChanMask) -> Self {
+        Self::from_registers(&[&OpCode::ModifyChannel, &Empty::new(), gnd,
+            capgnd, cursrc])
+    }
+}
+
+impl Instruction for ModifyChannel { make_vec_instr_impl!(ModifyChannel, instrs); }
+
 /// Delays with 20 ns precision
 ///
 /// The `Delay` instruction is used to configure to insert delays into the ArC2
