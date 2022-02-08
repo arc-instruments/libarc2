@@ -1458,9 +1458,9 @@ impl U32Mask<wordreg::Wx4> {
 
 /// Channel configuration bitmask.
 ///
-/// An `ChanMask` is used to select one or more channels. Essentially
-/// it defines which channels the Read Current, Read Voltage or Amp Prep
-/// operations be applied to.
+/// A `ChanMask` is used to select one or more channels. Essentially
+/// it defines which channels the Read Current, Read Voltage, Amp Prep
+/// or Modify Channel operations are applied to.
 ///
 /// See [`U32Mask`][`crate::registers::U32Mask`] for details and
 /// methods.
@@ -1469,6 +1469,7 @@ impl U32Mask<wordreg::Wx4> {
 /// ```
 /// use libarc2::registers::{ChanMask, ToU32s};
 ///
+/// // new chanmask with everything set to 0
 /// let mut chan = ChanMask::new();
 ///
 /// // set some channels
@@ -1482,6 +1483,23 @@ impl U32Mask<wordreg::Wx4> {
 /// assert_eq!(chan.as_u32s(), &[0x40000000, 0x80000001]);
 /// ```
 pub type ChanMask = U32Mask<wordreg::Wx2>;
+
+impl ChanMask {
+
+    /// Shorthand for [`ChanMask::new()`] (no channels selected)
+    pub fn none() -> Self {
+        Self::new()
+    }
+
+    /// Create a new ChanMask with all channels selected
+    pub fn all() -> Self {
+        let mut mask = Self::new();
+        mask.set_enabled_all(true);
+
+        mask
+    }
+
+}
 
 /// Averaging for read operations
 #[derive(Clone, Copy, FromPrimitive, ToPrimitive, Debug)]
