@@ -11,7 +11,7 @@ use crate::registers::{ClusterMask, PulseAttrs};
 use num_traits::FromPrimitive;
 
 macro_rules! make_vec_instr_impl {
-    ($t:ident, $f:ident) => {
+    ($t:ident, $f:ident, $n:expr) => {
 
         #[doc(hidden)]
         type S = Self;
@@ -30,6 +30,10 @@ macro_rules! make_vec_instr_impl {
 
         fn view(&self) -> &[u32] {
             &self.$f
+        }
+
+        fn name(&self) -> &'static str {
+            $n
         }
     }
 }
@@ -70,6 +74,9 @@ pub trait Instruction {
 
     /// Get a u32 view of the current instruction
     fn view(&self) -> &[u32];
+
+    /// Name of the instruction
+    fn name(&self) -> &'static str;
 
     /// Pad and terminate instruction for consumption. This will be
     /// typically communicated to ArC2 using the
@@ -165,7 +172,7 @@ impl ResetDAC {
     }
 }
 
-impl Instruction for ResetDAC { make_vec_instr_impl!(ResetDAC, instrs); }
+impl Instruction for ResetDAC { make_vec_instr_impl!(ResetDAC, instrs, "RESET"); }
 
 
 /// Update DAC configuration previously set with [`ResetDAC`] or [`SetDAC`]
@@ -194,7 +201,7 @@ impl UpdateDAC {
     }
 }
 
-impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs); }
+impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs, "UP CH"); }
 
 
 /// Set a DAC configuration
@@ -461,7 +468,7 @@ impl SetDAC {
     }
 }
 
-impl Instruction for SetDAC { make_vec_instr_impl!(SetDAC, instrs); }
+impl Instruction for SetDAC { make_vec_instr_impl!(SetDAC, instrs, "LD VOLT"); }
 
 
 /// Set channel configuration
@@ -576,7 +583,7 @@ impl UpdateChannel {
 }
 
 
-impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs); }
+impl Instruction for UpdateChannel { make_vec_instr_impl!(UpdateChannel, instrs, "UP CH"); }
 
 
 /// Modify a channel with respect to ground
@@ -636,7 +643,7 @@ impl ModifyChannel {
     }
 }
 
-impl Instruction for ModifyChannel { make_vec_instr_impl!(ModifyChannel, instrs); }
+impl Instruction for ModifyChannel { make_vec_instr_impl!(ModifyChannel, instrs, "MOD CH"); }
 
 /// Delays with 20 ns precision
 ///
@@ -712,7 +719,7 @@ impl Delay {
     }
 }
 
-impl Instruction for Delay { make_vec_instr_impl!(Delay, instrs); }
+impl Instruction for Delay { make_vec_instr_impl!(Delay, instrs, "DELAY"); }
 
 
 /// Configure I/O logic.
@@ -785,7 +792,7 @@ impl UpdateLogic {
     }
 }
 
-impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs); }
+impl Instruction for UpdateLogic { make_vec_instr_impl!(UpdateLogic, instrs, "UP LGC"); }
 
 
 /// Perform a current read operation on selected channels.
@@ -839,7 +846,7 @@ impl CurrentRead {
 
 }
 
-impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs); }
+impl Instruction for CurrentRead { make_vec_instr_impl!(CurrentRead, instrs, "C READ"); }
 
 
 /// Perform a voltage read operation on selected channels.
@@ -898,7 +905,7 @@ impl VoltageRead {
 
 }
 
-impl Instruction for VoltageRead { make_vec_instr_impl!(VoltageRead, instrs); }
+impl Instruction for VoltageRead { make_vec_instr_impl!(VoltageRead, instrs, "V READ"); }
 
 
 /// Setup High Speed drivers
@@ -1003,7 +1010,7 @@ impl HSConfig {
 
 }
 
-impl Instruction for HSConfig { make_vec_instr_impl!(HSConfig, instrs); }
+impl Instruction for HSConfig { make_vec_instr_impl!(HSConfig, instrs, "HS CONF"); }
 
 
 /// Initiate a high speed pulse operation
@@ -1071,7 +1078,7 @@ impl HSPulse {
     }
 }
 
-impl Instruction for HSPulse { make_vec_instr_impl!(HSPulse, instrs); }
+impl Instruction for HSPulse { make_vec_instr_impl!(HSPulse, instrs, "HS PLS"); }
 
 
 /// Connect feedback resistors to the op-amps
@@ -1119,7 +1126,7 @@ impl AmpPrep {
 
 }
 
-impl Instruction for AmpPrep { make_vec_instr_impl!(AmpPrep, instrs); }
+impl Instruction for AmpPrep { make_vec_instr_impl!(AmpPrep, instrs, "AMP PRP"); }
 
 /// Reset hardware to default state
 ///
@@ -1145,7 +1152,7 @@ impl Clear {
     }
 }
 
-impl Instruction for Clear { make_vec_instr_impl!(Clear, instrs); }
+impl Instruction for Clear { make_vec_instr_impl!(Clear, instrs, "CLR"); }
 
 #[cfg(test)]
 mod tests {

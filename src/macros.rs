@@ -15,8 +15,8 @@ macro_rules! vidx {
 #[cfg(feature="debug_packets")]
 macro_rules! instrdbg {
     ($val: expr) => {
-        eprintln!("INSTR: {:08x?}", $val.view());
-        eprintln!("INSTR: {:02x?}", $val.to_bytevec());
+        eprintln!("INSTR: [{:>8}] {:08x?}", $val.name(), $val.view());
+        eprintln!("INSTR: [{:>8}] {:02x?}", $val.name(), $val.to_bytevec());
     }
 }
 
