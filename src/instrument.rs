@@ -672,7 +672,8 @@ impl Instrument {
     }
 
     /// Modify previously configured channels by switching them to ground. Use an
-    /// empty channel list to release.
+    /// empty channel list to release. This will clear any other ground/floating
+    /// instructions, for instance one issued with [`Instrument::connect_to_ac_gnd()`].
     pub fn connect_to_gnd(&mut self, channels: &[usize]) -> Result<&mut Self, ArC2Error> {
 
         let mut chanmask = ChanMask::new();
@@ -688,6 +689,23 @@ impl Instrument {
 
     }
 
+    /// Modify previously configured channels by switching them to a capacitor backed ground.
+    /// Use an empty channel list to release. This will clear any other ground/floating
+    /// instructions, for instance one issued with [`Instrument::connect_to_gnd()`].
+    pub fn connect_to_ac_gnd(&mut self, channels: &[usize]) -> Result<&mut Self, ArC2Error> {
+
+        let mut chanmask = ChanMask::new();
+        for c in channels {
+            chanmask.set_enabled(*c, true);
+        }
+
+        let mut instr = ModifyChannel::from_masks(&ChanMask::none(), &chanmask,
+            &ChanMask::none());
+        self.process(instr.compile())?;
+
+        Ok(self)
+
+    }
     /// Prepare the DACs for transition to VoltArb
     fn _amp_prep(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*PREP_AMP_ALL)?;
