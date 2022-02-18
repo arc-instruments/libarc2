@@ -420,7 +420,7 @@ impl Instrument {
         instr.process(&*RESET_DAC)?;
         instr.process(&*SET_3V3_LOGIC)?;
         instr.process(&*UPDATE_DAC)?;
-        instr.add_delay(20_000u128)?;
+        instr.add_delay(30_000u128)?;
         instr.execute()?;
 
         Ok(instr)
@@ -649,7 +649,7 @@ impl Instrument {
     pub fn reset_dacs(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
-        self.add_delay(20_000u128)?;
+        self.add_delay(30_000u128)?;
         self.execute()
     }
 
@@ -663,7 +663,7 @@ impl Instrument {
     pub fn ground_all(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
-        self.add_delay(20_000u128)?;
+        self.add_delay(30_000u128)?;
         self.process(&*PREP_AMP_ALL)?;
         self.add_delay(100_000u128)?;
         self.process(&*CHAN_ARB_ALL)?;
@@ -716,7 +716,7 @@ impl Instrument {
     pub fn ground_all_fast(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
-        self.add_delay(20_000u128)?;
+        self.add_delay(30_000u128)?;
 
         Ok(self)
     }
@@ -829,7 +829,7 @@ impl Instrument {
             self.process(instr.compile())?;
         }
         self.process(&*UPDATE_DAC)?;
-        self.add_delay(20_000u128)?;
+        self.add_delay(30_000u128)?;
 
         // set all channels to Arbitrary Voltage
         let mut channelconf =
@@ -1266,7 +1266,7 @@ impl Instrument {
 
         // setup a non-high speed differential pulsing scheme
         self._setup_dacs_for_pulsing(&[(low, high, voltage)], false, true)?;
-        self.add_delay(nanos+20_000u128)?;
+        self.add_delay(nanos+30_000u128)?;
 
         Ok(self)
 
@@ -1321,7 +1321,7 @@ impl Instrument {
         self.process(conf.compile())?;
         // setup a high-speed differential pulsing scheme
         self._setup_dacs_for_pulsing(&[(low, high, voltage)], true, true)?;
-        self.add_delay(20_000u128)?;
+        self.add_delay(30_000u128)?;
         // HS configuration
         self.process(hsconf.compile())?;
         // HS Pulse
@@ -1365,7 +1365,7 @@ impl Instrument {
 
         // setup a non-high speed differential pulsing scheme
         self._setup_dacs_for_pulsing(&channel_pairs, false, true)?;
-        self.add_delay(nanos+20_000u128)?;
+        self.add_delay(nanos+30_000u128)?;
 
         Ok(self)
     }
@@ -1458,7 +1458,7 @@ impl Instrument {
         // is used instead `timings` for high channels above should be
         // set to 0 ns.
         self._setup_dacs_for_pulsing(&channel_pairs, true, true)?;
-        self.add_delay(20_000u128)?;
+        self.add_delay(30_000u128)?;
 
         self.process(hsconf.compile())?;
         self.process(pulse)?;
