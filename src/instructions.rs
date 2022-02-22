@@ -201,7 +201,7 @@ impl UpdateDAC {
     }
 }
 
-impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs, "UP CH"); }
+impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs, "UP DAC"); }
 
 
 /// Set a DAC configuration
