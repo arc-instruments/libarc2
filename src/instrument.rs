@@ -153,6 +153,15 @@ impl std::convert::From<std::sync::mpsc::SendError<Option<Chunk>>> for ArC2Error
     }
 }
 
+
+/// Current status of the TIA feedback loop
+#[derive(Clone, Debug)]
+enum TIAState {
+    Closed,
+    Open
+}
+
+
 /// Order of read/pulse operation when reading all crosspoints
 ///
 /// This enum signifies how a _{read,pulse} all_ operation should be
@@ -288,7 +297,9 @@ pub struct Instrument {
 
     // Long operation handling
     _sender: Sender<Option<Chunk>>,
-    _receiver: Arc<Mutex<Receiver<Option<Chunk>>>>
+    _receiver: Arc<Mutex<Receiver<Option<Chunk>>>>,
+
+    _tia_state: TIAState,
 }
 
 /// Find available device IDs.
@@ -394,7 +405,8 @@ impl Instrument {
                 instr_buffer: buffer,
                 memman: Arc::new(RwLock::new(MemMan::new())),
                 _sender: sender,
-                _receiver: Arc::new(Mutex::new(receiver))
+                _receiver: Arc::new(Mutex::new(receiver)),
+                _tia_state: TIAState::Open
             }),
             Err(err) => Err(ArC2Error::FPGAError(err))
         }
@@ -417,6 +429,7 @@ impl Instrument {
     pub fn open_with_fw(id: i32, path: &str, retained_mode: bool) -> Result<Instrument, ArC2Error> {
         let mut instr = Instrument::open(id, retained_mode)?;
         instr.load_firmware(&path)?;
+        instr._amp_prep()?;
         instr.process(&*RESET_DAC)?;
         instr.process(&*SET_3V3_LOGIC)?;
         instr.process(&*UPDATE_DAC)?;
@@ -656,6 +669,7 @@ impl Instrument {
     /// Disconnect all channels
     pub fn float_all(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*CHAN_FLOAT_ALL)?;
+        self._tia_state = TIAState::Open;
         Ok(self)
     }
 
@@ -664,8 +678,7 @@ impl Instrument {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(30_000u128)?;
-        self.process(&*PREP_AMP_ALL)?;
-        self.add_delay(100_000u128)?;
+        self._amp_prep()?;
         self.process(&*CHAN_ARB_ALL)?;
 
         Ok(self)
@@ -706,10 +719,24 @@ impl Instrument {
         Ok(self)
 
     }
-    /// Prepare the DACs for transition to VoltArb
+
+    /// Prepare the DACs for transition to VoltArb or CurrentRead
     fn _amp_prep(&mut self) -> Result<&mut Self, ArC2Error> {
-        self.process(&*PREP_AMP_ALL)?;
-        self.add_delay(100_000u128)
+        match self._tia_state {
+            TIAState::Open => {
+                self._tia_state = TIAState::Closed;
+                // set DACs to 0V and connect to GND
+                self.ground_all_fast()?;
+                self.connect_to_gnd(&ALL_CHANS)?;
+                self.process(&*PREP_AMP_ALL)?;
+                self.add_delay(100_000u128)?;
+                // and disconnect GND before moving on
+                self.connect_to_gnd(&[])
+            },
+            TIAState::Closed => {
+                Ok(self)
+            }
+        }
     }
 
     /// Set all DACs to ground maintaining current channel state
@@ -824,6 +851,7 @@ impl Instrument {
         // generate a list of dac settings, only one channel in this case
         let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)], (zero, zero), false);
 
+        self._amp_prep()?;
         // process them with the appropriate delay
         for mut instr in setdacs {
             self.process(instr.compile())?;
@@ -872,7 +900,7 @@ impl Instrument {
         let mut chunk = self._read_slice_inner(low, &[high], vidx!(-vread))?;
 
         // ... and finally withdraw voltage from the biasing channels
-        self.ground_all()?.execute()?;
+        self.ground_all_fast()?.execute()?;
 
         // Read the requested chunk...
         let res = self.read_chunk(&mut chunk, &DataMode::All)?;
@@ -900,7 +928,7 @@ impl Instrument {
             // Initiate a read operation get the address of the data to be...
             chunk = self._read_slice_inner(chan, &*ALL_WORDS, vidx!(-vread))?;
             // ... and finally withdraw voltage from the biasing channels
-            self.ground_all()?.execute()?;
+            self.ground_all_fast()?.execute()?;
             res = self.read_chunk(&mut chunk, &DataMode::Words)?;
         // Or the other way around. Channels 16..32 and
         // 48..64 correspond to columns so we want to read
@@ -909,7 +937,7 @@ impl Instrument {
             // Initiate a read operation get the address of the data to be...
             chunk = self._read_slice_inner(chan, &*ALL_BITS, vidx!(-vread))?;
             // ... and finally withdraw voltage from the biasing channels
-            self.ground_all()?.execute()?;
+            self.ground_all_fast()?.execute()?;
             res = self.read_chunk(&mut chunk, &DataMode::Bits)?;
         }
 
@@ -952,7 +980,7 @@ impl Instrument {
         let mut chunk = self._read_slice_inner(chan, &mask, vidx!(-vread))?;
 
         // ... and finally withdraw voltage from the biasing channels
-        self.ground_all()?.execute()?;
+        self.ground_all_fast()?.execute()?;
 
         // Make an array to hold all the values of row/column
         let mut res: Vec<f32> = Vec::with_capacity(32);
@@ -1319,6 +1347,7 @@ impl Instrument {
 
         // set channels as HS
         self.process(conf.compile())?;
+        self._tia_state = TIAState::Open;
         // setup a high-speed differential pulsing scheme
         self._setup_dacs_for_pulsing(&[(low, high, voltage)], true, true)?;
         self.add_delay(30_000u128)?;
@@ -1361,6 +1390,7 @@ impl Instrument {
         }
 
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
+        self._amp_prep()?;
         self.process(conf.compile())?;
 
         // setup a non-high speed differential pulsing scheme
@@ -1438,7 +1468,6 @@ impl Instrument {
 
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
 
-
         let mut hsconf = HSConfig::new(timings);
 
         let pulse_attrs = PulseAttrs::new_with_params(hs_clusters,
@@ -1453,6 +1482,7 @@ impl Instrument {
         }
 
         self.process(conf.compile())?;
+        self._tia_state = TIAState::Open;
         // setup a high speed differential pulsing scheme
         // WARNING! If a non-differential pulse (last argument is `false`)
         // is used instead `timings` for high channels above should be
@@ -1516,7 +1546,6 @@ impl Instrument {
             // with this work case in mind.
             let mut chunk = self.pulse_one_fast(low, high, vpulse, nanos, true)?
                                 .ground_all_fast()?
-                                ._amp_prep()?
                                 ._read_slice_inner(low, &[high], vidx!(-vread))?;
             self.ground_all_fast()? // we are already in VoltArb no need to AmpPrep again
                 .execute()?;
@@ -1554,7 +1583,6 @@ impl Instrument {
         if nanos < 500_000_000u128 {
             let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, None, true)?
                                 .ground_all_fast()?
-                                ._amp_prep()?
                                 ._read_slice_inner(chan, channels, vidx!(-vread))?;
             self.ground_all_fast()?
                 .execute()?;
@@ -1563,7 +1591,7 @@ impl Instrument {
             res
         } else {
             self.pulse_slice_slow(chan, vpulse, nanos, None)?
-                .ground_all()?;
+                .ground_all_fast()?;
             self.read_slice(chan, vread)
         }
 
@@ -1604,7 +1632,6 @@ impl Instrument {
             for chan in bias_channels {
                 let chunk = self.pulse_slice_fast(*chan, vpulse, nanos, None, true)?
                                 .ground_all_fast()?
-                                ._amp_prep()?
                                 ._read_slice_inner(*chan, read_channels, vidx!(-vread))?;
                 self.ground_all_fast()?
                     .execute()?;
@@ -1621,7 +1648,7 @@ impl Instrument {
         } else {
             for chan in bias_channels {
                 self.pulse_slice_slow(*chan, vpulse, nanos, None)?
-                    .ground_all()?;
+                    .ground_all_fast()?;
                 result.append(&mut self.read_slice(*chan, vread)?);
             }
         }
@@ -1660,7 +1687,6 @@ impl Instrument {
         if nanos < 500_000_000u128 {
             let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, Some(mask), true)?
                                 .ground_all_fast()?
-                                ._amp_prep()?
                                 ._read_slice_inner(chan, &mask, vidx!(-vread))?;
             self.ground_all_fast()?
                 .execute()?;
@@ -1678,7 +1704,7 @@ impl Instrument {
 
         } else {
             self.pulse_slice_slow(chan, vpulse, nanos, Some(mask))?
-                .ground_all()?;
+                .ground_all_fast()?;
             res = self.read_slice_masked(chan, mask, vread)?;
         }
 
