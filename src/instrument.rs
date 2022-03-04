@@ -269,6 +269,28 @@ pub enum DataMode {
 }
 
 
+/// Exit condition for long running processes
+#[derive(Clone)]
+pub enum WaitFor {
+    Time(std::time::Duration),
+    Iterations(usize)
+}
+
+impl WaitFor {
+    /// Unwrap the inner [`Duration`][`std::time::Duration`]. This will
+    /// panic if used with on an improper variant.
+    pub fn time(self) -> std::time::Duration {
+        if let WaitFor::Time(t) = self { t } else { panic!("No Time variant") }
+    }
+
+    /// Unwrap the inner number of [`WaitFor::Pulses`][`std::time::Duration`].
+    /// This will panic if used with on an improper variant.
+    pub fn iterations(self) -> usize {
+        if let WaitFor::Iterations(i) = self { i } else { panic!("No Iterations variant") }
+    }
+}
+
+
 /// ArC2 entry level object
 ///
 /// `Instrument` implements the frontend for the ArC2. Its role is essentially
@@ -1884,6 +1906,53 @@ impl Instrument {
         };
 
         Ok(self)
+    }
+
+    /// Perform a retention-like read train operation on a single cross-point.
+    // XXX: This needs better in-thread error handling
+    pub fn read_train(&mut self, low: usize, high: usize, vread: f32, interpulse: u128, condition: WaitFor)
+        -> Result<(), ArC2Error> {
+
+        self.reset_dacs()?;
+
+        let now = time::Instant::now();
+        let mut iter = 0;
+
+        let mut slf = self.clone();
+        let cond = condition.clone();
+
+        std::thread::spawn(move || {
+            let sender = slf._sender.clone();
+            slf._op_running.store(true, atomic::Ordering::Relaxed);
+            loop {
+                let chunk = slf._read_slice_inner(low, &[high], vidx!(-vread)).unwrap();
+                slf.ground_all_fast().unwrap();
+                if interpulse > 0u128 {
+                    slf.add_delay(interpulse).unwrap();
+                }
+                slf.execute().unwrap();
+                slf.wait();
+                sender.send(Some(chunk)).unwrap();
+                iter += 1;
+
+                match cond {
+                    WaitFor::Time(d) => {
+                        if now.elapsed() >= d {
+                            break;
+                        }
+                    },
+                    WaitFor::Iterations(i) => {
+                        if iter >= i {
+                            break;
+                        }
+                    }
+                }
+            }
+            slf._op_running.store(false, atomic::Ordering::Relaxed);
+        });
+
+        Ok(())
+
     }
 
     /// Read one block of values from the internal buffer
