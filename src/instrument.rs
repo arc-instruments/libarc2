@@ -1,7 +1,6 @@
 use std::{time, thread};
 use std::collections::HashSet;
-use std::sync::{RwLock, Arc, Mutex};
-//use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{RwLock, Arc, Mutex, atomic};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
@@ -298,6 +297,8 @@ pub struct Instrument {
     // Long operation handling
     _sender: Sender<Option<Chunk>>,
     _receiver: Arc<Mutex<Receiver<Option<Chunk>>>>,
+    // A thread has been spawned
+    _op_running: Arc<atomic::AtomicBool>,
 
     _tia_state: TIAState,
 }
@@ -406,7 +407,9 @@ impl Instrument {
                 memman: Arc::new(RwLock::new(MemMan::new())),
                 _sender: sender,
                 _receiver: Arc::new(Mutex::new(receiver)),
-                _tia_state: TIAState::Open
+                _op_running: Arc::new(atomic::AtomicBool::new(false)),
+                _tia_state: TIAState::Open,
+
             }),
             Err(err) => Err(ArC2Error::FPGAError(err))
         }
@@ -1897,7 +1900,11 @@ impl Instrument {
                     break
                 },
                 Err(TryRecvError::Empty) => {
-                    if self.busy() {
+                    // The ordering of the OR clause here is important!
+                    // If there's nothing on the receiver and an operation is
+                    // running then there's no point checking if the device is
+                    // busy by querying the memory. It most likely is!
+                    if self._op_running.load(atomic::Ordering::Relaxed) || self.busy() {
                         continue
                     } else {
                         chunk_opt = None;
