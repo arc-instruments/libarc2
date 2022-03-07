@@ -1912,7 +1912,7 @@ impl Instrument {
     // XXX: This needs better in-thread error handling
     pub fn read_train(&mut self, low: usize, high: usize, vread: f32, interpulse: u128, condition: WaitFor)
         -> Result<(), ArC2Error> {
-
+        self._op_running.store(true, atomic::Ordering::Relaxed);
         self.reset_dacs()?;
 
         let now = time::Instant::now();
@@ -1923,7 +1923,6 @@ impl Instrument {
 
         std::thread::spawn(move || {
             let sender = slf._sender.clone();
-            slf._op_running.store(true, atomic::Ordering::Relaxed);
             loop {
                 let chunk = slf._read_slice_inner(low, &[high], vidx!(-vread)).unwrap();
                 slf.ground_all_fast().unwrap();
