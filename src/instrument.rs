@@ -5,6 +5,7 @@ use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 use beastlink as bl;
 use ndarray::{Array, Ix1, Ix2};
 use thiserror::Error;
+use spin_sleep;
 
 use crate::instructions::*;
 use crate::registers::{ChannelState, ChanMask, IOMask};
@@ -559,7 +560,7 @@ impl Instrument {
                             Err(err) => { return Err(ArC2Error::FPGAError(err)); }
                         }
                     }
-                    thread::sleep(WRITEDELAY);
+                    spin_sleep::sleep(WRITEDELAY);
                     // empty the buffer
                     actual_buf.clear();
                     Ok(self)
