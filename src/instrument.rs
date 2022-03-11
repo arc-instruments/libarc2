@@ -927,6 +927,7 @@ impl Instrument {
 
         // ... and finally withdraw voltage from the biasing channels
         self.ground_all_fast()?.execute()?;
+        self.wait();
 
         // Read the requested chunk...
         let res = self.read_chunk(&mut chunk, &DataMode::All)?;
@@ -955,6 +956,7 @@ impl Instrument {
             chunk = self._read_slice_inner(chan, &*ALL_WORDS, vidx!(-vread))?;
             // ... and finally withdraw voltage from the biasing channels
             self.ground_all_fast()?.execute()?;
+            self.wait();
             res = self.read_chunk(&mut chunk, &DataMode::Words)?;
         // Or the other way around. Channels 16..32 and
         // 48..64 correspond to columns so we want to read
@@ -964,6 +966,7 @@ impl Instrument {
             chunk = self._read_slice_inner(chan, &*ALL_BITS, vidx!(-vread))?;
             // ... and finally withdraw voltage from the biasing channels
             self.ground_all_fast()?.execute()?;
+            self.wait();
             res = self.read_chunk(&mut chunk, &DataMode::Bits)?;
         }
 
@@ -1007,6 +1010,7 @@ impl Instrument {
 
         // ... and finally withdraw voltage from the biasing channels
         self.ground_all_fast()?.execute()?;
+        self.wait();
 
         // Make an array to hold all the values of row/column
         let mut res: Vec<f32> = Vec::with_capacity(32);
@@ -1575,6 +1579,7 @@ impl Instrument {
                                 ._read_slice_inner(low, &[high], vidx!(-vread))?;
             self.ground_all_fast()? // we are already in VoltArb no need to AmpPrep again
                 .execute()?;
+            self.wait();
 
             let data = self.read_chunk(&mut chunk, &DataMode::All)?;
             Ok(data[high])
@@ -1612,6 +1617,7 @@ impl Instrument {
                                 ._read_slice_inner(chan, channels, vidx!(-vread))?;
             self.ground_all_fast()?
                 .execute()?;
+            self.wait();
             let res = self.read_chunk(&mut chunk, &mode);
 
             res
@@ -1661,6 +1667,7 @@ impl Instrument {
                                 ._read_slice_inner(*chan, read_channels, vidx!(-vread))?;
                 self.ground_all_fast()?
                     .execute()?;
+                self.wait();
 
                 chunks.push(chunk);
 
@@ -1716,6 +1723,7 @@ impl Instrument {
                                 ._read_slice_inner(chan, &mask, vidx!(-vread))?;
             self.ground_all_fast()?
                 .execute()?;
+            self.wait();
 
             res = Vec::with_capacity(32);
             let data = self.read_chunk(&mut chunk, &DataMode::All)?;
