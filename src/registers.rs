@@ -1713,7 +1713,7 @@ impl IOEnable {
         io.set_all_outputs(true);
 
         // IO is active low so we must set it to 1
-        io.set_enabled(false);
+        io.set_en(false);
 
         io
     }
@@ -1722,6 +1722,7 @@ impl IOEnable {
     pub fn all_output() -> IOEnable {
         let vec: BitVec<u32, Lsb0> = BitVec::repeat(false, Self::LEN);
         let mut io = IOEnable { bits: vec };
+        io.set_en(true);
         io.set_all_outputs(true);
 
         io
@@ -1731,18 +1732,19 @@ impl IOEnable {
     pub fn all_input() -> IOEnable {
         let vec: BitVec<u32, Lsb0> = BitVec::repeat(false, Self::LEN);
         let mut io = IOEnable { bits: vec };
+        io.set_en(true);
         io.set_all_outputs(false);
 
         io
     }
 
     /// Toggle the enable bit
-    pub fn set_enabled(&mut self, status: bool) {
+    pub fn set_en(&mut self, status: bool) {
         // IO Enable is active low
         self.set_output(Self::LEN-1, !status);
     }
 
-    pub fn is_enabled(&self) -> bool {
+    pub fn get_en(&self) -> bool {
         !self.bits[Self::LEN-1]
     }
 
@@ -1802,7 +1804,7 @@ mod ioenable_tests {
     #[test]
     fn ioenable_new_mut() {
         let mut io = IOEnable::new();
-        io.set_enabled(true);
+        io.set_en(true);
         io.set_output(0, true);
         io.set_output(1, true);
         io.set_output(2, false);

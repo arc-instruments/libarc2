@@ -1774,9 +1774,9 @@ impl Instrument {
     /// Configures the digital I/Os to the specified levels. The I/Os can only be
     /// configured as outputs for now, so the bitmask essentially switches the
     /// digital outputs as low/high.
-    pub fn set_logic(&mut self, mask: &IOMask, enable: bool) -> Result<&mut Self, ArC2Error> {
+    pub fn set_logic(&mut self, mask: &IOMask) -> Result<&mut Self, ArC2Error> {
 
-        let mut instr = UpdateLogic::with_regs_output(&mask, enable);
+        let mut instr = UpdateLogic::with_mask(&mask);
         self.process(instr.compile())?;
 
         Ok(self)

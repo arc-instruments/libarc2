@@ -765,10 +765,10 @@ impl UpdateLogic {
         let mut mask = IOMask::new();
         mask.set_enabled_all(output);
 
-        let mut dir = IOEnable::new();
-        dir.set_enabled(enable);
+        let mut en = IOEnable::new();
+        en.set_en(enable);
 
-        Self::with_regs(&mask, &dir)
+        Self::with_regs(&mask, &en)
 
     }
 
@@ -783,10 +783,10 @@ impl UpdateLogic {
 
     /// Create a new output instruction from registers. This is
     /// essentially [`with_regs`][`UpdateLogic::with_regs`] but
-    /// with all channels set as output.
-    pub fn with_regs_output(mask: &IOMask, enable: bool) -> Self {
+    /// with all channels set as output and !EN enabled.
+    pub fn with_mask(mask: &IOMask) -> Self {
         let mut ioenable = IOEnable::new();
-        ioenable.set_enabled(enable);
+        ioenable.set_en(true);
 
         Self::with_regs(&mask, &ioenable)
     }
