@@ -10,6 +10,7 @@ use spin_sleep;
 use crate::instructions::*;
 use crate::registers::{ChannelState, ChanMask, IOMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
+use crate::registers::{IOEnable};
 use crate::registers::consts::HSCLUSTERMAP;
 use crate::memory::{MemMan, Chunk, MemoryError};
 
@@ -1763,7 +1764,15 @@ impl Instrument {
 
         let mut iologic = match mode {
             ControlMode::Internal => UpdateLogic::new(false, true),
-            ControlMode::Header => UpdateLogic::new(true, true)
+            ControlMode::Header =>  {
+                let mut mask = IOMask::new();
+                mask.set_enabled(0, true);
+
+                let mut en = IOEnable::new();
+                en.set_en(true);
+
+                UpdateLogic::with_regs(&mask, &en)
+            }
         };
 
         self.process(iologic.compile())?;
