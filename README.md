@@ -13,7 +13,7 @@ bindings](https://github.com/arc-instruments/pyarc2). If you do, however,
 want to hack on `libarc2` itself or build Rust-based testing programs then
 you can do so by adding the following to you `Cargo.toml`.
 
-```
+```toml
 [dependencies]
 libarc2 = { git = "https://github.com/arc-instruments/libarc2" }
 ```

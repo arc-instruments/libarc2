@@ -1,6 +1,6 @@
 [package]
 name = "libarc2"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Spyros Stathopoulos <spyros@arc-instruments.co.uk>"]
 description = "Low-level interface library for ArC TWO™"
 edition = "2018"
