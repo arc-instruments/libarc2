@@ -2,7 +2,10 @@ use std::{time, thread};
 use std::collections::HashSet;
 use std::sync::{RwLock, Arc, Mutex, atomic};
 use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
+
+#[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 use beastlink as bl;
+
 use ndarray::{Array, Ix1, Ix2};
 use thiserror::Error;
 use spin_sleep;
@@ -19,8 +22,12 @@ const EFM03_PID: u16 = 0xc583;
 const BASEADDR: u32 = 0x80000000;
 const FIFOBUSYADDR: u32 = 0x80020000;
 const WRITEDELAY: time::Duration = time::Duration::from_nanos(2_500_000);
+
+#[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
+#[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
+
 const INBUF: usize = 64*std::mem::size_of::<u32>();
 const VALUEAVAILFLAG: u32 = 0xcafebabe;
 const INSTRCAP: usize = 768*9*std::mem::size_of::<u32>();
@@ -128,6 +135,7 @@ lazy_static! {
 #[derive(Error, Debug)]
 pub enum ArC2Error {
     /// Low level FPGA communication error
+    #[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
     #[error("FPGA Error: {0}")]
     FPGAError(#[from] bl::BLError),
     /// Memory management error
@@ -141,7 +149,10 @@ pub enum ArC2Error {
     RampOperationError(f32, f32, f32),
     /// Output buffer access error
     #[error("Cannot store address {0} to output buffer")]
-    OutputBufferError(i64)
+    OutputBufferError(i64),
+    /// Unsupported platform
+    #[error("Hardware functionality unavailable on this platform")]
+    PlatformUnsupported(),
 }
 
 impl std::convert::From<std::sync::mpsc::SendError<Option<Chunk>>> for ArC2Error {
@@ -301,6 +312,7 @@ impl WaitFor {
 /// are written to the tool as soon they are issued. In retained mode
 /// instructions will be gathered into a buffer which **must** be flushed
 /// explicitly for them to have any effect.
+#[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 #[derive(Clone)]
 pub struct Instrument {
 
@@ -332,6 +344,7 @@ pub struct Instrument {
 /// This function will enumerate all available boards and return an array
 /// with the IDs of all found devices. This can be passed on to
 /// [`Instrument::open()`] to connect to a specific device.
+#[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 pub fn find_ids() -> Result<Vec<i32>, ArC2Error> {
     /*let max_id = match bl::enumerate(EFM03_VID, EFM03_PID) {
         Ok(v) => Ok(v),
@@ -345,6 +358,11 @@ pub fn find_ids() -> Result<Vec<i32>, ArC2Error> {
         // max_id -1 usually indicates an error...
         Err(ArC2Error::InvalidID(max_id))
     }
+}
+
+#[cfg(not(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64")))]
+pub fn find_ids() -> Result<Vec<i32>, ArC2Error> {
+    Err(ArC2Error::PlatformUnsupported())
 }
 
 
@@ -400,6 +418,7 @@ fn _adc_to_current(val: u32) -> f32 {
 }
 
 
+#[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 impl Instrument {
 
     /// Create a new Instrument with a known ID.  Use [`find_ids`]
@@ -575,6 +594,11 @@ impl Instrument {
             None => Ok(self)
         }
 
+    }
+
+    #[cfg(not(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64")))]
+    pub fn execute(&mut self) -> Result<&mut Self, ArC2Error> {
+        Err(ArC2Error::PlatformUnsupported())
     }
 
     /// Compiles and process an instruction
@@ -1098,6 +1122,7 @@ impl Instrument {
 
         let _efm = self.efm.clone();
         let efm = _efm.lock().unwrap();
+
         let response = match efm.read_block(FIFOBUSYADDR, 1i32, BLFLAGS_R) {
             Ok(buf) => { pktdbg!(buf); buf[0] },
             Err(_) => { eprintln!("Error reading FIFO busy"); 0u8 }
@@ -1110,6 +1135,7 @@ impl Instrument {
     // Variant of busy for internal use when a lock to a bl::Device has already
     // been acquired
     fn __busy_no_lock(&self, efm: &bl::Device) -> bool {
+
         let response = match efm.read_block(FIFOBUSYADDR, 1i32, BLFLAGS_R) {
             Ok(buf) => { pktdbg!(buf); buf[0] },
             Err(_) => { eprintln!("Error reading FIFO busy"); 0u8 }
@@ -2034,6 +2060,7 @@ impl Instrument {
 }
 
 
+#[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 impl Drop for Instrument {
     fn drop(&mut self) {
         if Arc::strong_count(&self.efm) == 1 {
