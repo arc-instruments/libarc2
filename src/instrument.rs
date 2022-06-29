@@ -892,6 +892,48 @@ impl Instrument {
         Ok(result)
     }
 
+    /// Configure channels at specified voltages. Argument `voltages` expects an
+    /// array of tuples following the format `(channel, voltage)`. If `base`
+    /// is not `None` the channels *not* included in `voltages` will be preset
+    /// at the specified voltage, otherwise they will be left at whatever state
+    /// they are currently. For instance to set channels 7, 8 and 9 at 1.0, 1.5 and
+    /// 2.0 V respectively while grounding the rest you would do the following
+    ///
+    /// ```no_run
+    /// use libarc2::{Instrument};
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    ///
+    /// let input: Vec<(u16, f32)> = vec![(7, 1.0), (8, 1.5), (9, 2.0)];
+    /// // Setup channels 7, 8 and 9, set others to 0.0 V
+    /// arc2.config_channels(&input, Some(0.0));
+    /// ```
+    pub fn config_channels(&mut self, voltages: &[(u16, f32)], base: Option<f32>)
+        -> Result<&mut Self, ArC2Error> {
+
+
+        let (base_voltage, clear) = match base {
+            Some(x) => ((vidx!(x), vidx!(x)), true),
+            None => ((vidx!(0.0), vidx!(0.0)), false)
+        };
+
+        let mut input: Vec<(u16, u16, u16)> = Vec::with_capacity(voltages.len());
+
+        for item in voltages {
+            input.push((item.0, vidx!(item.1), vidx!(item.1)));
+        }
+
+        let instrs = SetDAC::from_channels(&input, base_voltage, clear);
+
+        for mut i in instrs {
+            self.process(i.compile())?;
+        }
+
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(30_000u128)?;
+
+        Ok(self)
+    }
+
     /// Common read functionality with one low channel and several high channels.
     /// This function is guaranteed never to flush the output.
     fn _read_slice_inner(&mut self, low: usize, highs: &[usize], vread: u16)
