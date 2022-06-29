@@ -83,11 +83,11 @@ pub trait Instruction {
     /// [`process`][`crate::Instrument::process()`] and
     /// [`compile_process`][`crate::Instrument::compile_process`] functions.
     ///
-    /// ```ignore
+    /// ```no_run
     /// use libarc2::{Instrument};
     /// use libarc2::instructions::{ResetDAC, Instruction};
     ///
-    /// let arc2 = Instrument::open_with_fw(0, "fw.bin").unwrap();
+    /// let arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
     ///
     /// let reset = ResetDAC::new();
     /// arc2.process(reset.compile());
