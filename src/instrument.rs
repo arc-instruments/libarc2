@@ -964,7 +964,7 @@ impl Instrument {
             adcmask.set_enabled(*chan, true);
         }
 
-        let chunk = self.make_chunk().unwrap();
+        let chunk = self.make_chunk()?;
 
         #[cfg(feature="zero_before_write")]
         match self._zero_chunk(&chunk) {
