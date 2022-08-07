@@ -924,6 +924,8 @@ impl Instrument {
 
         let instrs = SetDAC::from_channels(&input, base_voltage, clear);
 
+        self._amp_prep()?;
+
         for mut i in instrs {
             self.process(i.compile())?;
         }
