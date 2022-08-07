@@ -1996,10 +1996,24 @@ impl Instrument {
         Ok(self)
     }
 
-    /// Perform a retention-like read train operation on a single cross-point.
+    /// Perform a retention-like read train operation on a single cross-point at specific
+    /// interpulse intervals.
+    ///
+    /// You can optionally pre-load the cross-point at a voltage but be aware that if it's
+    /// different from `vread` an additional instruction will be generated after **every** read
+    /// operation to set the voltage back at `preload` voltage so it's not recommended unless you
+    /// know what you are doing. There are two common scenarios for `read_train`: (a) if you are
+    /// trying to do a chronoamperometry measurement (bias a cross-point and measure the current at
+    /// specific intervals) then the correct call is `read_train(low, high, vread, interpulse,
+    /// Some(vread), WaitFor.Time(…)/WaitFor.Iterations(…))`; (b) if you are trying to do a
+    /// retention-like measurement (read an otherwise grounded cross-point at specific intervals)
+    /// then the correct call is `read_train(low, high, vread, interpulse, None,
+    /// WaitFor.Time(…)/WaitFor.Iterations(…))`.
     // XXX: This needs better in-thread error handling
-    pub fn read_train(&mut self, low: usize, high: usize, vread: f32, interpulse: u128, condition: WaitFor)
+    pub fn read_train(&mut self, low: usize, high: usize, vread: f32, interpulse: u128,
+        preload: Option<f32>, condition: WaitFor)
         -> Result<(), ArC2Error> {
+
         self._op_running.store(true, atomic::Ordering::Relaxed);
         self.reset_dacs()?;
 
@@ -2011,9 +2025,34 @@ impl Instrument {
 
         std::thread::spawn(move || {
             let sender = slf._sender.clone();
+
+            // if preloading, set the bias voltage, this will get
+            // executed *before* the first execute, implicitly called by
+            // the first _read_slice_inner of the loop
+            match preload {
+                Some(v) => {
+                    let input: Vec<(u16, f32)> = vec![(low as u16, -v)];
+                    slf.config_channels(&input, None).unwrap();
+                }
+                _ => {}
+            };
+
             loop {
                 let chunk = slf._read_slice_inner(low, &[high], vidx!(-vread)).unwrap();
-                slf.ground_all_fast().unwrap();
+                // if crosspoint is preloaded do not ground the lines, instead put it
+                // back to the preloading voltage (if different from vread)
+                match preload {
+                    Some(v) => {
+                        // unless preload and vread are similar (difference is less
+                        // than 5 mV) put the correct bias back on the line
+                        if (vread == v) || (vread - v).abs() > 5e-3 {
+                            let input: Vec<(u16, f32)> = vec![(low as u16, -v)];
+                            slf.config_channels(&input, None).unwrap()
+                               .execute().unwrap();
+                        }
+                    }
+                    None => { slf.ground_all_fast().unwrap(); }
+                };
                 if interpulse > 0u128 {
                     slf.add_delay(interpulse).unwrap();
                 }
@@ -2025,11 +2064,21 @@ impl Instrument {
                 match cond {
                     WaitFor::Time(d) => {
                         if now.elapsed() >= d {
+                            // ensure crosspoint is grounded if pre-loaded
+                            match preload {
+                                None => { slf.ground_all_fast().unwrap(); }
+                                _ => {}
+                            };
                             break;
                         }
                     },
                     WaitFor::Iterations(i) => {
                         if iter >= i {
+                            // ensure crosspoint is grounded if pre-loaded
+                            match preload {
+                                None => { slf.ground_all_fast().unwrap(); }
+                                _ => {}
+                            };
                             break;
                         }
                     }
