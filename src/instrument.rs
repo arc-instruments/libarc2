@@ -983,6 +983,49 @@ impl Instrument {
         Ok(chunk)
     }
 
+    /// Do an open current measurement along the specified channels. No channel setup is
+    /// done before the actual current measurement. If required this should be done with
+    /// [`Instrument::config_channels`]. Setting `ground` to `true` will ground the channels
+    /// after the measurement has gone through.
+    pub fn read_slice_open(&mut self, highs: &[usize], ground: bool) -> Result<Vec<f32>, ArC2Error> {
+
+        self._amp_prep()?;
+
+        let mut channelconf = UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
+        self.process(channelconf.compile())?;
+
+        let mut adcmask = ChanMask::new();
+
+        for chan in highs {
+            adcmask.set_enabled(*chan, true);
+        }
+
+        let mut chunk = self.make_chunk()?;
+
+        #[cfg(feature="zero_before_write")]
+        match self._zero_chunk(&chunk) {
+            Ok(()) => {},
+            Err(err) => { eprintln!("Zeroing chunk at {} failed: {}", chunk.addr(), err) }
+        };
+
+        let mut currentread = CurrentRead::new(&adcmask, chunk.addr(),
+            chunk.flag_addr(), VALUEAVAILFLAG);
+        self.process(currentread.compile())?;
+        self.add_delay(1_000u128)?;
+
+        if ground {
+            self.ground_all_fast()?.execute()?;
+        } else {
+            self.execute()?;
+        }
+
+        self.wait();
+
+        let res = self.read_chunk(&mut chunk, &DataMode::All)?;
+
+        Ok(res)
+    }
+
     /// Perform a current read between the specified channels. A voltage
     /// of `-vread` will be applied to the `low` channel and current will
     /// be read from the `high` channel.
