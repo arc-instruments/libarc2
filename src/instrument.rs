@@ -719,6 +719,7 @@ impl Instrument {
 
     /// Disconnect all channels
     pub fn float_all(&mut self) -> Result<&mut Self, ArC2Error> {
+        self.connect_to_gnd(&[])?;
         self.process(&*CHAN_FLOAT_ALL)?;
         self._tia_state = TIAState::Open;
         Ok(self)
