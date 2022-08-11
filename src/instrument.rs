@@ -1367,16 +1367,14 @@ impl Instrument {
 
     }
 
-    /// Setup the biasing channels for multi-channel pulsing. This function will setup
-    /// the output DACs for pulsing of a single crosspoint. The `config` argument
-    /// holds a list of bias pairs in the form of `(low ch, high ch, voltage)`.
-    /// This function will set the high channel to `voltage/2` and the low channel
-    /// to `-voltage/2` if `differential` is `true` otherwise it will apply `-voltage`
-    /// to the low channel and 0.0 to the high. If the `high_speed` argument is true
-    /// then the DACs will be setup for high-speed pulsing as required
-    /// by the High Speed drivers. No delays are introduced here as this will be
-    /// handled either by a standard Delay instruction or a High Speed timer.
-    fn _setup_dacs_for_pulsing(&mut self, config: &[(usize, usize, f32)], high_speed: bool, differential: bool)
+    /// Setup the biasing channels for multi-channel 2 terminal pulsing.  The `config` argument
+    /// holds a list of bias pairs in the form of `(low ch, high ch, voltage)`.  This function will
+    /// set the high channel to `voltage/2` and the low channel to `-voltage/2` if `differential`
+    /// is `true` otherwise it will apply `-voltage` to the low channel and 0.0 to the high. If the
+    /// `high_speed` argument is true then the DACs will be setup for high-speed pulsing as
+    /// required by the High Speed drivers. No delays are introduced here as this will be handled
+    /// either by a standard Delay instruction or a High Speed timer.
+    fn _setup_dacs_2t_pulsing(&mut self, config: &[(usize, usize, f32)], high_speed: bool, differential: bool)
         -> Result<(), ArC2Error> {
 
         // (idx, low, high); as required by SetDAC::from_channels().
@@ -1438,7 +1436,7 @@ impl Instrument {
         self.process(conf.compile())?;
 
         // setup a non-high speed differential pulsing scheme
-        self._setup_dacs_for_pulsing(&[(low, high, voltage)], false, true)?;
+        self._setup_dacs_2t_pulsing(&[(low, high, voltage)], false, true)?;
         self.add_delay(nanos+30_000u128)?;
 
         Ok(self)
@@ -1494,7 +1492,7 @@ impl Instrument {
         self.process(conf.compile())?;
         self._tia_state = TIAState::Open;
         // setup a high-speed differential pulsing scheme
-        self._setup_dacs_for_pulsing(&[(low, high, voltage)], true, true)?;
+        self._setup_dacs_2t_pulsing(&[(low, high, voltage)], true, true)?;
         self.add_delay(30_000u128)?;
         // HS configuration
         self.process(hsconf.compile())?;
@@ -1539,7 +1537,7 @@ impl Instrument {
         self.process(conf.compile())?;
 
         // setup a non-high speed differential pulsing scheme
-        self._setup_dacs_for_pulsing(&channel_pairs, false, true)?;
+        self._setup_dacs_2t_pulsing(&channel_pairs, false, true)?;
         self.add_delay(nanos+30_000u128)?;
 
         Ok(self)
@@ -1598,7 +1596,7 @@ impl Instrument {
             channel_pairs.push((chan, *c, voltage));
             // IMPORTANT! This assumes differential pulsing. If
             // not then nanos should be set to 0 and
-            // `_setup_dacs_for_pulsing` should be called with
+            // `_setup_dacs_2t_pulsing` should be called with
             // differential set to false.
             timings[*c/8] = nanos as u32;
             // and mark the cluster as high speed
@@ -1632,7 +1630,7 @@ impl Instrument {
         // WARNING! If a non-differential pulse (last argument is `false`)
         // is used instead `timings` for high channels above should be
         // set to 0 ns.
-        self._setup_dacs_for_pulsing(&channel_pairs, true, true)?;
+        self._setup_dacs_2t_pulsing(&channel_pairs, true, true)?;
         self.add_delay(30_000u128)?;
 
         self.process(hsconf.compile())?;
