@@ -9,6 +9,7 @@ use crate::registers::{IOEnable, IOMask, ChanMask, Averaging};
 use crate::registers::{Duration50, Address, HSDelay, DACCluster};
 use crate::registers::{ClusterMask, PulseAttrs};
 use num_traits::FromPrimitive;
+use thiserror::Error;
 
 macro_rules! make_vec_instr_impl {
     ($t:ident, $f:ident, $n:expr) => {
@@ -42,6 +43,29 @@ macro_rules! dacvoltage {
     ($low: expr, $high: expr) => {
         (($high as u32) << 16) | (($low as u32) & 0xFFFF)
     }
+}
+
+// Check if a pair of DAC Voltages is valid. The DAC-
+// portion must be AT MOST 1u16 greater than the DAC+
+// portion of the DAC Voltage
+macro_rules! dacvoltages_ok {
+    ($low: expr, $high: expr) => {
+
+        match $low {
+            low if low == u16::MAX => $high >= u16::MAX - 1,
+            low => match $high {
+                high if high == u16::MAX => true,
+                high => low <= high + 1
+            }
+        }
+
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum InstructionError {
+    #[error("Invalid DAC composition at DAC-: {0} DAC+: {1}")]
+    InvalidDACComposition(u16, u16)
 }
 
 
@@ -230,20 +254,20 @@ impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs, "UP DAC
 /// // CH2 0x8000_9000 channel 4 (high) and 5 (low)
 /// // CH3 0x9000_FFFF channel 6 (high) and 7 (low)
 /// let mut voltages = DACVoltage::new();
-/// voltages.set_high(0, 0x0000);
-/// voltages.set_low(0, 0x8000);
+/// voltages.set_high(0, 0x8000);
+/// voltages.set_low(0, 0x0000);
 /// voltages.set_high(1, 0x8000);
 /// voltages.set_low(1, 0x8000);
-/// voltages.set_high(2, 0x8000);
-/// voltages.set_low(2, 0x9000);
-/// voltages.set_high(3, 0x9000);
-/// voltages.set_low(3, 0xFFFF);
+/// voltages.set_high(2, 0x9000);
+/// voltages.set_low(2, 0x8000);
+/// voltages.set_high(3, 0xFFFF);
+/// voltages.set_low(3, 0x9000);
 ///
-/// let mut instr = SetDAC::with_regs(&mask, &voltages);
+/// let mut instr = SetDAC::with_regs(&mask, &voltages).unwrap();
 ///
 /// assert_eq!(instr.compile().view(),
-///     &[0x1, 0x3, 0x0, 0x0, 0x8000, 0x80008000,
-///       0x80009000, 0x9000FFFF, 0x80008000]);
+///     &[0x1, 0x3, 0x0, 0x0, 0x80000000, 0x80008000,
+///       0x90008000, 0xFFFF9000, 0x80008000]);
 /// ```
 pub struct SetDAC {
     instrs: Vec<u32>
@@ -274,8 +298,13 @@ impl SetDAC {
     }
 
     /// Create a new instruction with all channels set at
-    /// the specified levels
-    pub fn new_all_at_bias(low: u16, high: u16) -> Self {
+    /// the specified levels. Will throw an error if DAC- > DAC+.
+    pub fn new_all_at_bias(low: u16, high: u16) -> Result<Self, InstructionError> {
+
+        if !dacvoltages_ok!(low, high) {
+            return Err(InstructionError::InvalidDACComposition(low, high));
+        }
+
         let mut instr = SetDAC::create();
         instr.push_register(&OpCode::SetDAC);
         instr.push_register(&DACMask::ALL);
@@ -283,7 +312,7 @@ impl SetDAC {
         instr.push_register(&Empty::new());
         instr.push_register(&DACVoltage::new_at_levels(low, high));
 
-        instr
+        Ok(instr)
     }
 
     /// Create a new logic instruction
@@ -316,7 +345,19 @@ impl SetDAC {
     }
 
     /// Create a new instruction with specified registers
-    pub fn with_regs(chanmask: &DACMask, voltages: &DACVoltage) -> Self {
+    pub fn with_regs(chanmask: &DACMask, voltages: &DACVoltage) ->
+        Result<Self, InstructionError> {
+
+        for idx in 0..voltages.len() {
+            let l = voltages.get_low(idx);
+            let h = voltages.get_high(idx);
+
+            if !dacvoltages_ok!(l, h) {
+                return Err(InstructionError::InvalidDACComposition(l, h));
+            }
+
+        }
+
         let mut instr = SetDAC::create();
         instr.push_register(&OpCode::SetDAC);
         instr.push_register(chanmask);
@@ -324,7 +365,7 @@ impl SetDAC {
         instr.push_register(&Empty::new());
         instr.push_register(voltages);
 
-        instr
+        Ok(instr)
     }
 
     /// Assemble a minimum set of instructions that correspond to the supplied
@@ -352,7 +393,7 @@ impl SetDAC {
     ///    (22, 0x7000, 0x7000), (17, 0x6000, 0x7000), (63, 0x7000, 0x9000)
     /// ];
     ///
-    /// let mut instructions = SetDAC::from_channels(&input, (0x8000, 0x8000), false);
+    /// let mut instructions = SetDAC::from_channels(&input, (0x8000, 0x8000), false).unwrap();
     ///
     /// assert_eq!(instructions.len(), 4);
     /// assert_eq!(instructions[0].compile().view(),
@@ -371,7 +412,7 @@ impl SetDAC {
     /// // If `clear` is set an additional instruction will be
     /// // emitted first to set all channels to the specified voltage.
     /// // In this case all inactive channels are at 0.0 V.
-    /// let mut instructions = SetDAC::from_channels(&input, (0x8000, 0x8000), true);
+    /// let mut instructions = SetDAC::from_channels(&input, (0x8000, 0x8000), true).unwrap();
     ///
     /// assert_eq!(instructions.len(), 5);
     /// assert_eq!(instructions[0].compile().view(),
@@ -391,13 +432,16 @@ impl SetDAC {
     ///       0x80008000, 0x80008000, 0x90007000, 0x80008000]);
     ///
     /// ```
-    pub fn from_channels(input: &[(u16, u16, u16)], base: (u16, u16), clear: bool) -> Vec<Self> {
+    pub fn from_channels(input: &[(u16, u16, u16)], base: (u16, u16), clear: bool)
+        -> Result<Vec<Self>, InstructionError> {
+
         let mut result: Vec<SetDAC> = Vec::new();
 
         let (low, high) = (base.0, base.1);
 
+        // This will complain if low > high+1
         if clear {
-            result.push(SetDAC::new_all_at_bias(low, high));
+            result.push(SetDAC::new_all_at_bias(low, high)?);
         }
 
         let mut channels: [(u16, u16); 64] = [(low, high); 64];
@@ -407,6 +451,7 @@ impl SetDAC {
         for (idx, low, high) in input {
             channels[*idx as usize] = (*low, *high);
         }
+
 
         for (idx, chunk) in channels.chunks(4usize).enumerate() {
 
@@ -447,11 +492,11 @@ impl SetDAC {
             let mask = DACMask::from_bits(bits).unwrap();
             let voltages = DACVoltage::from_raw_values(&key);
 
-            result.push(SetDAC::with_regs(&mask, &voltages));
+            result.push(SetDAC::with_regs(&mask, &voltages)?);
         }
 
 
-        result
+        Ok(result)
     }
 
     /// Set the channel mask of this instruction
@@ -1225,37 +1270,37 @@ mod tests {
         assert_eq!(mask, DACMask::CH00_03 | DACMask::CH04_07);
 
         // Set the voltages to
-        // CH0 0x0000_8000 channel 0 (high) and 1 (low)
-        // CH1 0x8000_8000 channel 2 (high) and 3 (low)
-        // CH2 0x8000_9000 channel 4 (high) and 5 (low)
-        // CH3 0x9000_FFFF channel 6 (high) and 7 (low)
+        // CH0 0x0000_8000 channel 0 (low) and 1 (high)
+        // CH1 0x8000_8000 channel 2 (low) and 3 (high)
+        // CH2 0x8000_9000 channel 4 (low) and 5 (high)
+        // CH3 0x9000_FFFF channel 6 (low) and 7 (high)
         let mut voltages = DACVoltage::new();
-        voltages.set_high(0, 0x0000);
-        voltages.set_low( 0, 0x8000);
+        voltages.set_high(0, 0x8000);
+        voltages.set_low( 0, 0x0000);
         voltages.set_high(1, 0x8000);
         voltages.set_low( 1, 0x8000);
-        voltages.set_high(2, 0x8000);
-        voltages.set_low( 2, 0x9000);
-        voltages.set_high(3, 0x9000);
-        voltages.set_low( 3, 0xFFFF);
+        voltages.set_high(2, 0x9000);
+        voltages.set_low( 2, 0x8000);
+        voltages.set_high(3, 0xFFFF);
+        voltages.set_low( 3, 0x9999);
         assert_eq!(voltages.as_u32s(),
-            &[0x00008000, 0x80008000, 0x80009000, 0x9000FFFF]);
+            &[0x80000000, 0x80008000, 0x90008000, 0xFFFF9999]);
 
-        let mut instr = SetDAC::with_regs(&mask, &voltages);
+        let mut instr = SetDAC::with_regs(&mask, &voltages).unwrap();
 
         assert_eq!(instr.compile().view(),
-            &[0x1, 0x3, 0x0, 0x0, 0x8000, 0x80008000,
-              0x80009000, 0x9000FFFF, 0x80008000]);
+            &[0x1, 0x3, 0x0, 0x0, 0x80000000, 0x80008000,
+              0x90008000, 0xFFFF9999, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
             &[0x01, 0x00, 0x00, 0x00,
               0x03, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00,
-              0x00, 0x80, 0x00, 0x00,
+              0x00, 0x00, 0x00, 0x80,
               0x00, 0x80, 0x00, 0x80,
-              0x00, 0x90, 0x00, 0x80,
-              0xFF, 0xFF, 0x00, 0x90,
+              0x00, 0x80, 0x00, 0x90,
+              0x99, 0x99, 0xFF, 0xFF,
               0x00, 0x80, 0x00, 0x80]);
 
     }

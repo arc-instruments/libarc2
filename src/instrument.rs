@@ -141,6 +141,8 @@ pub enum ArC2Error {
     /// Memory management error
     #[error("Memory error: {0}")]
     MemoryError(#[from] MemoryError),
+    #[error("Instruction Error: {0}")]
+    InstructionError(#[from] InstructionError),
     /// Invalid Device ID or device not existing
     #[error("Invalid ArC2 device id: {0}")]
     InvalidID(i32),
@@ -923,7 +925,7 @@ impl Instrument {
             input.push((item.0, vidx!(item.1), vidx!(item.1)));
         }
 
-        let instrs = SetDAC::from_channels(&input, base_voltage, clear);
+        let instrs = SetDAC::from_channels(&input, base_voltage, clear)?;
 
         self._amp_prep()?;
 
@@ -945,7 +947,7 @@ impl Instrument {
         let zero: u16 = vidx!(0.0);
 
         // generate a list of dac settings, only one channel in this case
-        let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)], (zero, zero), false);
+        let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)], (zero, zero), false)?;
 
         self._amp_prep()?;
         // process them with the appropriate delay
@@ -1411,7 +1413,7 @@ impl Instrument {
 
         }
 
-        let instrs = SetDAC::from_channels(&channels, (vidx!(0.0), vidx!(0.0)), false);
+        let instrs = SetDAC::from_channels(&channels, (vidx!(0.0), vidx!(0.0)), false)?;
         for mut i in instrs {
             self.process(i.compile())?;
         }

@@ -1212,9 +1212,11 @@ pub struct DACVoltage {
 
 impl DACVoltage {
 
+    const NUMVOLTAGES: usize = 4;
+
     /// Create a new register with four channels
     pub fn new() -> DACVoltage {
-        Self::new_with_size_and_voltage(4, DACVZERO)
+        Self::new_with_size_and_voltage(Self::NUMVOLTAGES, DACVZERO)
     }
 
     /// Create a new register with all four channels set at
@@ -1288,7 +1290,7 @@ impl DACVoltage {
 
     /// Number of configured channels
     pub fn len(&self) -> usize {
-        self.values.len()
+        Self::NUMVOLTAGES
     }
 
 }
