@@ -1316,12 +1316,12 @@ impl Instrument {
     /// applied to the `low` channel `voltage/2` to the `high` channel. When `preset_state`
     /// is true the state of high speed drivers will be initialised before the actual pulsing
     /// sequence begins.
-    pub fn pulse_one(&mut self, low: usize, high: usize, voltage: f32, nanos: u128, preset_state: bool)
+    pub fn pulse_one(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
         -> Result<&mut Self, ArC2Error> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
-            self.pulse_one_fast(low, high, voltage, nanos, preset_state)?;
+            self.pulse_one_fast(low, high, voltage, nanos)?;
         } else {
             self.pulse_one_slow(low, high, voltage, nanos)?;
         }
@@ -1332,14 +1332,12 @@ impl Instrument {
     /// Apply a pulse to all channels with `chan` as the low potential channel.
     ///
     /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
-    /// to a row pulse, otherwise it's a column pulse. When `preset_state`
-    /// is true the state of high speed drivers will be initialised before the actual pulsing
-    /// sequence begins.
-    pub fn pulse_slice(&mut self, chan: usize, voltage: f32, nanos: u128, preset_state: bool) -> Result<&mut Self, ArC2Error> {
+    /// to a row pulse, otherwise it's a column pulse.
+    pub fn pulse_slice(&mut self, chan: usize, voltage: f32, nanos: u128) -> Result<&mut Self, ArC2Error> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
-            self.pulse_slice_fast(chan, voltage, nanos, None, preset_state)?;
+            self.pulse_slice_fast(chan, voltage, nanos, None)?;
         } else {
             self.pulse_slice_slow(chan, voltage, nanos, None)?;
         }
@@ -1353,11 +1351,11 @@ impl Instrument {
     /// to a row pulse, otherwise it's a column pulse. When `preset_state`
     /// is true the state of high speed drivers will be initialised before the actual pulsing
     /// sequence begins.
-    pub fn pulse_slice_masked(&mut self, chan: usize, mask: &[usize], voltage: f32, nanos: u128, preset_state: bool) -> Result<&mut Self, ArC2Error> {
+    pub fn pulse_slice_masked(&mut self, chan: usize, mask: &[usize], voltage: f32, nanos: u128) -> Result<&mut Self, ArC2Error> {
 
         // use the high speed driver for all pulses faster than 500 ms
         if nanos < 500_000_000u128 {
-            self.pulse_slice_fast(chan, voltage, nanos, Some(mask), preset_state)?;
+            self.pulse_slice_fast(chan, voltage, nanos, Some(mask))?;
         } else {
             self.pulse_slice_slow(chan, voltage, nanos, Some(mask))?;
         }
@@ -1445,7 +1443,7 @@ impl Instrument {
 
     /// Pulse a crosspoint using the high speed drivers. This function will *NOT*
     /// automatically flush output.
-    fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128, preset_state: bool)
+    fn pulse_one_fast(&mut self, low: usize, high: usize, voltage: f32, nanos: u128)
         -> Result<&mut Self, ArC2Error> {
 
         // set high and low channels as HS drivers
@@ -1483,10 +1481,9 @@ impl Instrument {
         let mut pulse_base = HSPulse::new_from_attrs(&pulse_attrs);
         let pulse = pulse_base.compile();
 
-        if preset_state {
-            self.process(&*ZERO_HS_TIMINGS)?;
-            self.process(pulse)?;
-        }
+        // preload the HS drivers
+        self.process(&*ZERO_HS_TIMINGS)?;
+        self.process(pulse)?;
 
         // set channels as HS
         self.process(conf.compile())?;
@@ -1543,7 +1540,7 @@ impl Instrument {
         Ok(self)
     }
 
-    fn pulse_slice_fast(&mut self, chan: usize, voltage: f32, nanos: u128, mask: Option<&[usize]>, preset_state:bool) ->
+    fn pulse_slice_fast(&mut self, chan: usize, voltage: f32, nanos: u128, mask: Option<&[usize]>) ->
         Result<&mut Self, ArC2Error> {
 
         let mut bias_conf = ChannelConf::new();
@@ -1619,10 +1616,9 @@ impl Instrument {
         let mut pulse_base = HSPulse::new_from_attrs(&pulse_attrs);
         let pulse = pulse_base.compile();
 
-        if preset_state {
-            self.process(&*ZERO_HS_TIMINGS)?;
-            self.process(pulse)?;
-        }
+        // Preload the HS drivers
+        self.process(&*ZERO_HS_TIMINGS)?;
+        self.process(pulse)?;
 
         self.process(conf.compile())?;
         self._tia_state = TIAState::Open;
@@ -1644,7 +1640,7 @@ impl Instrument {
     ///
     /// This function will pulse available crosspoints on the array. This can be done
     /// either by high biasing the rows ([`BiasOrder::Rows`]) or columns ([`BiasOrder::Columns`]).
-    pub fn pulse_all(&mut self, voltage: f32, nanos: u128, order: BiasOrder, preset_state: bool) -> Result<&mut Self, ArC2Error> {
+    pub fn pulse_all(&mut self, voltage: f32, nanos: u128, order: BiasOrder) -> Result<&mut Self, ArC2Error> {
 
         let bias_channels = match order {
             BiasOrder::Rows => &*ALL_WORDS,
@@ -1653,7 +1649,7 @@ impl Instrument {
 
         if nanos < 500_000_000u128 {
             for chan in bias_channels {
-               self.pulse_slice_fast(*chan, voltage, nanos, None, preset_state)?;
+               self.pulse_slice_fast(*chan, voltage, nanos, None)?;
             }
 
         } else {
@@ -1687,7 +1683,7 @@ impl Instrument {
             // pulse trains is by forgoing the intermediate reads (or read after
             // a batch of pulses). The way pulseread is structured is optimised
             // with this work case in mind.
-            let mut chunk = self.pulse_one_fast(low, high, vpulse, nanos, true)?
+            let mut chunk = self.pulse_one_fast(low, high, vpulse, nanos)?
                                 .ground_all_fast()?
                                 ._read_slice_inner(low, &[high], vidx!(-vread))?;
             self.ground_all_fast()? // we are already in VoltArb no need to AmpPrep again
@@ -1725,7 +1721,7 @@ impl Instrument {
         }
 
         if nanos < 500_000_000u128 {
-            let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, None, true)?
+            let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, None)?
                                 .ground_all_fast()?
                                 ._read_slice_inner(chan, channels, vidx!(-vread))?;
             self.ground_all_fast()?
@@ -1775,7 +1771,7 @@ impl Instrument {
             let mut chunks: Vec<Chunk> = Vec::with_capacity(32);
 
             for chan in bias_channels {
-                let chunk = self.pulse_slice_fast(*chan, vpulse, nanos, None, true)?
+                let chunk = self.pulse_slice_fast(*chan, vpulse, nanos, None)?
                                 .ground_all_fast()?
                                 ._read_slice_inner(*chan, read_channels, vidx!(-vread))?;
                 self.ground_all_fast()?
@@ -1831,7 +1827,7 @@ impl Instrument {
         }
 
         if nanos < 500_000_000u128 {
-            let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, Some(mask), true)?
+            let mut chunk = self.pulse_slice_fast(chan, vpulse, nanos, Some(mask))?
                                 .ground_all_fast()?
                                 ._read_slice_inner(chan, &mask, vidx!(-vread))?;
             self.ground_all_fast()?
@@ -1980,7 +1976,7 @@ impl Instrument {
             for pidx in 0..num_pulses {
 
                 if pw_nanos < 500_000_000u128 {
-                    self.pulse_one_fast(low, high, *v, pw_nanos, true)?
+                    self.pulse_one_fast(low, high, *v, pw_nanos)?
                         .ground_all_fast()?;
                 } else {
                     self.pulse_one_slow(low, high, *v, pw_nanos)?
