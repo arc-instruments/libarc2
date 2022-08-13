@@ -152,6 +152,15 @@ pub enum ArC2Error {
     /// Output buffer access error
     #[error("Cannot store address {0} to output buffer")]
     OutputBufferError(i64),
+    /// Invalid HS timing combination
+    #[error("HS Channel {0} has no timing associated on cluster {1}")]
+    HSClusterTimingError(usize, usize),
+    /// Invalid HS Duration
+    #[error("HS Channel pulse width {0} too long")]
+    /// Attempting to change a previously set polarity bit
+    HSDurationError(usize),
+    #[error("Attempting to toggle a previously set HS polarity bit")]
+    HSPolarityBitError(),
     /// Unsupported platform
     #[error("Hardware functionality unavailable on this platform")]
     PlatformUnsupported(),
@@ -1634,6 +1643,162 @@ impl Instrument {
         self.process(hsconf.compile())?;
         self.process(pulse)?;
         self.add_delay(nanos)?;
+
+        Ok(self)
+    }
+
+    /// Apply a sub-500 ms pulse to all specified channels
+    ///
+    /// This differs from [`Instrument::pulse_slice`] as it does not expect a low potential channel
+    /// as the "receiving" end.  When `preset_state` is true the state of high speed drivers will
+    /// be initialised before the actual pulsing sequence begins. Format of the `chans` slice
+    /// is [(chan number, pulse voltage, normal voltage), ...] and `cl_nanos` contains the
+    /// optional timings (pulse widths) per cluster. If cluster timing is `None` then
+    /// channels of this cluster won't be pulsed at all. Be aware that the function will throw
+    /// an error if a channel is included in the `chans` slice but the channel's cluster timing
+    /// is set to `None`. Same restriction as other pulsing functions apply here as well, which
+    /// means that 0 ns is valid timing, but anything between 1 ns and 40 ns will be clamped to
+    /// 40 ns. No restriction for timings between 41 ns and 5×10⁸ ns.
+    ///
+    /// Please note that this function uses the high speed drivers of ArC2. If you want similar
+    /// functionality with pulse widths > 500 ms you can do so using a sequence of
+    /// [`config_channels`][`Instrument::config_channels`] and
+    /// [`add_delay`][`Instrument::add_delay`] functions.
+    pub fn pulse_slice_fast_open(&mut self, chans: &[(usize, f32, f32)],
+        cl_nanos: &[Option<u128>; 8], preset_state: bool) -> Result<&mut Self, ArC2Error> {
+
+        let mut bias_conf = ChannelConf::new();
+        let mut timings: [u32; 8] = [0; 8];
+
+        let mut hs_clusters = ClusterMask::NONE;
+        let mut inv_clusters = ClusterMask::NONE;
+        let mut cncl_clusters = ClusterMask::NONE;
+
+        // Polarity bit tracking; initially no polarity bits are configured.
+        // During the loop below the polarity bits per cluster will be
+        // asserted (Some(true)) or deasserted (Some(false)).
+        let mut polarity_track: Vec<Option<bool>> = vec![None; 8];
+
+        // DAC configuration for active pulsing channels
+        let mut input_active: Vec<(u16, u16, u16)> = Vec::with_capacity(chans.len());
+
+        // this loop checks if the timings provided are consistent and
+        // collects the channel voltages as a list of arguments for the
+        // SetDAC::from_channels function.
+        for (chan, active_v, normal_v) in chans {
+            // ensure that a timing has been provided in the corresponding cluster
+            // index in `cl_nanos`. Reminder: cluster index is always floor(chan/8).
+            // For instance if `chans` contains (7, 2.0, 0.0) a channel in cluster 0
+            // (floor(7/8)) must have a timing configured. That essentially means that
+            // `cl_nanos[0]` MUST NOT BE `None`.
+            match cl_nanos[*chan/8] {
+                // there is a timing configured; good!
+                Some(t) => {
+
+                    let active_v_raw = vidx!(active_v);
+                    let normal_v_raw = vidx!(normal_v);
+
+                    // Determine and set cluster timing
+                    if t > 500_000_000u128 {
+                        return Err(ArC2Error::HSDurationError(*chan));
+                    } else {
+                        // this cast is safe as 5×10⁸ will always fit in a u32
+                        // and it will never reach this point otherwise
+                        timings[*chan/8] = t as u32;
+                    }
+                    // toggle the cluster corresponding to channel as high-speed
+                    hs_clusters |= HSCLUSTERMAP[chan/8];
+                    // and mark the channel as high speed as well
+                    bias_conf.set(*chan, ChannelState::HiSpeed);
+
+                    // add the channel DAC-/DAC+ values to the list of arguments
+                    // for the SetDAC::from_channels function.
+                    // max channel is 63 (+aux) so casts to u16 here are safe
+                    if active_v_raw <= normal_v_raw {
+                        input_active.push((*chan as u16, active_v_raw, normal_v_raw ));
+                    } else {
+                        input_active.push((*chan as u16, normal_v_raw, active_v_raw ));
+                    }
+
+                    // Determine the polarity bit, that essentially checks if
+                    // we are doing low → high → low transition (pol=0) or
+                    // high → low → high transition (pol=1)
+                    let polbithigh = active_v_raw <= normal_v_raw;
+
+                    // Check if a polarity bit has been previously set
+                    // for the cluster on which the channel is
+                    match polarity_track[*chan/8] {
+                        // If yes, check if it is the same
+                        Some(b) => {
+                            // If it's not we have two different polarities on the
+                            // same DAC cluster which is an error
+                            if b != polbithigh {
+                                return Err(ArC2Error::HSPolarityBitError())
+                            }
+                        },
+                        // If no polarity bit has been set for this cluster,
+                        // toggle the corresponding cluster bit and track it
+                        None => {
+                            if polbithigh {
+                                inv_clusters |= HSCLUSTERMAP[*chan/8];
+                            }
+                            polarity_track[*chan/8] = Some(polbithigh);
+                        }
+                    };
+
+                    if !preset_state {
+                        cncl_clusters |= HSCLUSTERMAP[*chan/8];
+                    }
+
+                },
+                // a channel has been selected in the `chans` argument but no timing
+                // has been provided for the corresponding cluster index in `cl_nanos`;
+                // that's an error
+                None => { return Err(ArC2Error::HSClusterTimingError(*chan, *chan/8)) }
+            };
+        }
+
+
+        // Ready the UP CH and HS CNF instructions for the actual pulse
+        let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
+        let mut hsconf = HSConfig::new(timings);
+
+        // PREP PULSE ATTRS (HS driver preloading)
+        let prep_pulse_attrs = PulseAttrs::new_with_params(hs_clusters, inv_clusters,
+            cncl_clusters);
+
+        // ACTUAL PULSE ATTRS (cancel is always NONE here)
+        let pulse_attrs = PulseAttrs::new_with_params(hs_clusters, inv_clusters,
+            ClusterMask::NONE);
+
+        let mut prep_pulse_base = HSPulse::new_from_attrs(&prep_pulse_attrs);
+        let mut pulse_base = HSPulse::new_from_attrs(&pulse_attrs);
+        let prep_pulse = prep_pulse_base.compile();
+        let pulse = pulse_base.compile();
+
+        // Preload the HS drivers HS CNF + HS PLS with 0 ns
+        self.process(&*ZERO_HS_TIMINGS)?;
+        self.process(prep_pulse)?;
+
+        // set pulse channel configuration for the actual pulse
+        self.process(conf.compile())?;
+        self._tia_state = TIAState::Open;
+
+        let instr_active = SetDAC::from_channels(&input_active, (vidx!(0.0), vidx!(0.0)), false)?;
+
+        // SetDAC for the actual pulse
+        for mut i in instr_active {
+            self.process(i.compile())?;
+        }
+
+        // UP DAC
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(30_000u128)?;
+
+        // HS CONF (actual)
+        self.process(hsconf.compile())?;
+        // HS PLS (actual)
+        self.process(pulse)?;
 
         Ok(self)
     }
