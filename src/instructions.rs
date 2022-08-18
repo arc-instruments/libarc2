@@ -254,14 +254,14 @@ impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs, "UP DAC
 /// // CH2 0x8000_9000 channel 4 (high) and 5 (low)
 /// // CH3 0x9000_FFFF channel 6 (high) and 7 (low)
 /// let mut voltages = DACVoltage::new();
-/// voltages.set_high(0, 0x8000);
-/// voltages.set_low(0, 0x0000);
-/// voltages.set_high(1, 0x8000);
-/// voltages.set_low(1, 0x8000);
-/// voltages.set_high(2, 0x9000);
-/// voltages.set_low(2, 0x8000);
-/// voltages.set_high(3, 0xFFFF);
-/// voltages.set_low(3, 0x9000);
+/// voltages.set_upper(0, 0x8000);
+/// voltages.set_lower(0, 0x0000);
+/// voltages.set_upper(1, 0x8000);
+/// voltages.set_lower(1, 0x8000);
+/// voltages.set_upper(2, 0x9000);
+/// voltages.set_lower(2, 0x8000);
+/// voltages.set_upper(3, 0xFFFF);
+/// voltages.set_lower(3, 0x9000);
 ///
 /// let mut instr = SetDAC::with_regs(&mask, &voltages).unwrap();
 ///
@@ -328,17 +328,17 @@ impl SetDAC {
         instr.push_register(&Empty::new());
 
         let mut voltages = DACVoltage::new();
-        voltages.set_high(0, 0x0000);
-        voltages.set_low(0, 0x0000);
+        voltages.set_upper(0, 0x0000);
+        voltages.set_lower(0, 0x0000);
 
         // Voltage will be divided by 2.62 internally to get
         // the actual voltage: 8.646/2.62 = 3.3.
-        voltages.set_high(1, vidx!(8.646));
-        voltages.set_low(1, 0x0000);
-        voltages.set_high(2, 0x0000);
-        voltages.set_low(2, 0x0000);
-        voltages.set_high(3, 0x0000);
-        voltages.set_low(3, 0x0000);
+        voltages.set_upper(1, vidx!(8.646));
+        voltages.set_lower(1, 0x0000);
+        voltages.set_upper(2, 0x0000);
+        voltages.set_lower(2, 0x0000);
+        voltages.set_upper(3, 0x0000);
+        voltages.set_lower(3, 0x0000);
         instr.push_register(&voltages);
 
         instr
@@ -349,8 +349,8 @@ impl SetDAC {
         Result<Self, InstructionError> {
 
         for idx in 0..voltages.len() {
-            let l = voltages.get_low(idx);
-            let h = voltages.get_high(idx);
+            let l = voltages.get_lower(idx);
+            let h = voltages.get_upper(idx);
 
             if !dacvoltages_ok!(l, h) {
                 return Err(InstructionError::InvalidDACComposition(l, h));
@@ -358,6 +358,13 @@ impl SetDAC {
 
         }
 
+        Ok(SetDAC::with_regs_unchecked(chanmask, voltages))
+    }
+
+    /// Create a new instruction with specific registers - no DAC+/DAC- check
+    /// This is only used internally - never, ever call this function unless
+    /// you know what you're doing
+    fn with_regs_unchecked(chanmask: &DACMask, voltages: &DACVoltage) -> Self {
         let mut instr = SetDAC::create();
         instr.push_register(&OpCode::SetDAC);
         instr.push_register(chanmask);
@@ -365,7 +372,7 @@ impl SetDAC {
         instr.push_register(&Empty::new());
         instr.push_register(voltages);
 
-        Ok(instr)
+        instr
     }
 
     /// Assemble a minimum set of instructions that correspond to the supplied
@@ -1275,14 +1282,14 @@ mod tests {
         // CH2 0x8000_9000 channel 4 (low) and 5 (high)
         // CH3 0x9000_FFFF channel 6 (low) and 7 (high)
         let mut voltages = DACVoltage::new();
-        voltages.set_high(0, 0x8000);
-        voltages.set_low( 0, 0x0000);
-        voltages.set_high(1, 0x8000);
-        voltages.set_low( 1, 0x8000);
-        voltages.set_high(2, 0x9000);
-        voltages.set_low( 2, 0x8000);
-        voltages.set_high(3, 0xFFFF);
-        voltages.set_low( 3, 0x9999);
+        voltages.set_upper(0, 0x8000);
+        voltages.set_lower( 0, 0x0000);
+        voltages.set_upper(1, 0x8000);
+        voltages.set_lower( 1, 0x8000);
+        voltages.set_upper(2, 0x9000);
+        voltages.set_lower( 2, 0x8000);
+        voltages.set_upper(3, 0xFFFF);
+        voltages.set_lower( 3, 0x9999);
         assert_eq!(voltages.as_u32s(),
             &[0x80000000, 0x80008000, 0x90008000, 0xFFFF9999]);
 
@@ -1319,14 +1326,14 @@ mod tests {
         // CH2 0x8000_9000 channel 4 (high) and 5 (low)
         // CH3 0x9000_FFFF channel 6 (high) and 7 (low)
         let mut voltages = DACVoltage::new();
-        voltages.set_high(0, 0x0000);
-        voltages.set_low( 0, 0x8000);
-        voltages.set_high(1, 0x8000);
-        voltages.set_low( 1, 0x8000);
-        voltages.set_high(2, 0x8000);
-        voltages.set_low( 2, 0x9000);
-        voltages.set_high(3, 0x9000);
-        voltages.set_low( 3, 0xFFFF);
+        voltages.set_upper(0, 0x0000);
+        voltages.set_lower( 0, 0x8000);
+        voltages.set_upper(1, 0x8000);
+        voltages.set_lower( 1, 0x8000);
+        voltages.set_upper(2, 0x8000);
+        voltages.set_lower( 2, 0x9000);
+        voltages.set_upper(3, 0x9000);
+        voltages.set_lower( 3, 0xFFFF);
         assert_eq!(voltages.as_u32s(),
             &[0x00008000, 0x80008000, 0x80009000, 0x9000FFFF]);
 

@@ -1182,8 +1182,10 @@ const DACVZERO: u32 = 0x80008000;
 /// `0x8000` is 0.0 volts which is the default value used when creating
 /// this register.
 ///
-/// DACs have two outputs, Vhigh and Vlow and typically Vhigh > Vlow in
-/// most circumstances. In normal measurement scenarios both output
+/// DACs have two outputs, upper and lower with upper > lower in
+/// most circumstances. These are represented by a single word (u32) with
+/// the upper 16 bits containing the upper voltage and the lower 16 bits
+/// the lower voltage. In normal non fast pulsing scenarios both output
 /// voltages should be the same and the user is advised to use the
 /// [`DACVoltage::set()`] function to set a voltage for a DAC. By
 /// default a new `DACVoltage` has four different channels as this
@@ -1202,8 +1204,8 @@ const DACVZERO: u32 = 0x80008000;
 /// assert_eq!(reg0.get(1), (0x8534, 0x8534));
 ///
 /// let mut reg1 = DACVoltage::new();
-/// // Set the high voltage of the third channel
-/// reg1.set_high(2, 0x8534);
+/// // Set the upper half voltage of the third channel
+/// reg1.set_upper(2, 0x8534);
 /// assert_eq!(reg1.get(2), (0x8000, 0x8534));
 /// ```
 pub struct DACVoltage {
@@ -1254,38 +1256,38 @@ impl DACVoltage {
         DACVoltage { values: values.to_vec() }
     }
 
-    /// Set the Vhigh value of a specified channel index
-    pub fn set_high(&mut self, idx: usize, voltage: u16) {
+    /// Set the upper value of a specified channel index
+    pub fn set_upper(&mut self, idx: usize, voltage: u16) {
         self.values[idx] = (voltage as u32) << 16 |
             (self.values[idx] & 0xFFFF);
     }
 
-    /// Get the Vhigh value of a specified channel index
-    pub fn get_high(&self, idx: usize) -> u16 {
+    /// Get the upper value of a specified channel index
+    pub fn get_upper(&self, idx: usize) -> u16 {
         ((self.values[idx] & 0xFFFF0000) >> 16) as u16
     }
 
-    /// Set the Vlow value of a specified channel index
-    pub fn set_low(&mut self, idx: usize, voltage: u16) {
+    /// Set the lower value of a specified channel index
+    pub fn set_lower(&mut self, idx: usize, voltage: u16) {
         self.values[idx] = (voltage as u32) <<  0 |
             (self.values[idx] & 0xFFFF0000);
     }
 
-    /// Get the Vlow value of a specified channel index
-    pub fn get_low(&self, idx: usize) -> u16 {
+    /// Get the lower value of a specified channel index
+    pub fn get_lower(&self, idx: usize) -> u16 {
         (self.values[idx] & 0xFFFF) as u16
     }
 
-    /// Set both Vhigh and Vlow of a specified channel index
+    /// Set both upper and lower of a specified channel index
     pub fn set(&mut self, idx: usize, voltage: u16) {
-        self.set_low(idx, voltage);
-        self.set_high(idx, voltage);
+        self.set_lower(idx, voltage);
+        self.set_upper(idx, voltage);
     }
 
-    /// Get both Vhigh and Vlow of a specified channel index.
-    /// The first `u16` of the tuple is Vlow, the second Vhigh.
+    /// Get both upper and lower of a specified channel index.
+    /// The first `u16` of the tuple is lower, the second upper.
     pub fn get(&self, idx: usize) -> (u16, u16) {
-        (self.get_low(idx), self.get_high(idx))
+        (self.get_lower(idx), self.get_upper(idx))
     }
 
     /// Number of configured channels
@@ -1315,23 +1317,23 @@ mod dacvoltage_tests {
     }
 
     #[test]
-    fn dacvoltage_set_high() {
+    fn dacvoltage_set_upper() {
         let mut v = DACVoltage::new();
-        v.set_high(3, 0xA0A0);
+        v.set_upper(3, 0xA0A0);
 
         assert_eq!(v.values[3], 0xA0A08000);
-        assert_eq!(v.get_high(3), 0xA0A0);
-        assert_eq!(v.get_low(3), 0x8000);
+        assert_eq!(v.get_upper(3), 0xA0A0);
+        assert_eq!(v.get_lower(3), 0x8000);
     }
 
     #[test]
-    fn dacvoltage_set_low() {
+    fn dacvoltage_set_lower() {
         let mut v = DACVoltage::new();
-        v.set_low(2, 0x90F3);
+        v.set_lower(2, 0x90F3);
 
         assert_eq!(v.values[2], 0x800090F3);
-        assert_eq!(v.get_high(2), 0x8000);
-        assert_eq!(v.get_low(2), 0x90F3);
+        assert_eq!(v.get_upper(2), 0x8000);
+        assert_eq!(v.get_lower(2), 0x90F3);
     }
 
     #[test]
@@ -1340,8 +1342,8 @@ mod dacvoltage_tests {
 
         v.set(1, 0x8534);
         assert_eq!(v.values[1], 0x85348534);
-        assert_eq!(v.get_low(1), 0x8534);
-        assert_eq!(v.get_high(1), 0x8534);
+        assert_eq!(v.get_lower(1), 0x8534);
+        assert_eq!(v.get_upper(1), 0x8534);
         assert_eq!(v.get(1), (0x8534, 0x8534));
     }
 
