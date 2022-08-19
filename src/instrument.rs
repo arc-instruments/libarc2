@@ -13,7 +13,7 @@ use spin_sleep;
 use crate::instructions::*;
 use crate::registers::{ChannelState, ChanMask, IOMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
-use crate::registers::{IOEnable};
+use crate::registers::{IOEnable, AuxDACFn};
 use crate::registers::consts::HSCLUSTERMAP;
 use crate::memory::{MemMan, Chunk, MemoryError};
 
@@ -946,6 +946,28 @@ impl Instrument {
         self.add_delay(30_000u128)?;
 
         Ok(self)
+    }
+
+    /// Configure the ArC2 auxiliary DACs. The AUX DACs manage signals
+    /// required by the peripheral ArC2 circuitry as well as the
+    /// arbitrary power supplies for DUTs. The sole argument is a
+    /// list of tuples containing the specified DAC function and its
+    /// corresponding voltage. See [`AuxDACFn`][`crate::registers::AuxDACFn`]
+    /// for the available DAC functions that can be passed as arguments.
+    pub fn config_aux_channels(&mut self, voltages: &[(AuxDACFn, f32)]) ->
+        Result<&mut Self, ArC2Error> {
+
+        let instrs = SetDAC::from_channels_aux(&voltages)?;
+
+        for mut i in instrs {
+            self.process(i.compile())?
+        }
+
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(30_000u128)?;
+
+        Ok(self)
+
     }
 
     /// Common read functionality with one low channel and several high channels.

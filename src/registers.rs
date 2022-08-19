@@ -166,6 +166,51 @@ impl ToU32s for OpCode {
 }
 
 
+/// Auxiliary DAC function
+///
+/// This is typically used with
+/// [`Instrument::config_aux_channels`][`crate::instrument::Instrument::config_aux_channels()`] to
+/// set the configuration for the auxiliary DACs that manage the selectors and the current source
+/// operation. Although logic level is also adjusted via the auxiliary DACs there is a dedicated
+/// function for this operation and it is not done via the
+/// [`Instrument::config_aux_channels`][`crate::instrument::Instrument::config_aux_channels()`]
+/// route.
+#[derive(Clone, Copy, FromPrimitive, ToPrimitive)]
+#[repr(usize)]
+pub enum AuxDACFn {
+    /// Selector circuit pulls down to this voltage
+    SELL = 0,
+    /// Selector circuit pulls up to this voltage
+    SELH = 1,
+    /// Arbitrary power supply for DUTs - Max current 100 mA
+    ARB4 = 2,
+    /// Arbitrary power supply for DUTs - Max current 100 mA
+    ARB3 = 3,
+    /// Arbitrary power supply for DUTs - Max current 100 mA
+    ARB1 = 4,
+    /// Arbitrary power supply for DUTs - Max current 100 mA
+    ARB2 = 5,
+    /// Reference voltage that the current source sources/sinks
+    /// current from/to. There should be a ≥3 V headroom between
+    /// CREF and the expected operating point of the current source
+    /// Must be within 1.5 V of CSET.
+    CREF = 6,
+    /// Sets output current of the current source. The difference
+    /// between CSET and CREF divided by the resistor selected
+    /// dictates the output current. This should never exceed 1.5 V.
+    /// Must be within 1.5 V of CREF.
+    CSET = 7,
+}
+
+impl AuxDACFn {
+
+    /// Returns `true` if this AUX function occupies
+    /// the lower 16 bits of the corresponding DAC
+    /// instruction - See the protocol document for more
+    pub(crate) fn is_lower(&self) -> bool {
+        (*self as usize) % 2 != 0
+    }
+}
 
 /// An empty register, typically used to pad instructions
 /// to full length.

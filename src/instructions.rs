@@ -7,7 +7,7 @@ use crate::registers::{OpCode, Empty, DACMask, DACVoltage};
 use crate::registers::{ChannelConf, SourceConf, ChannelState};
 use crate::registers::{IOEnable, IOMask, ChanMask, Averaging};
 use crate::registers::{Duration50, Address, HSDelay, DACCluster};
-use crate::registers::{ClusterMask, PulseAttrs};
+use crate::registers::{ClusterMask, PulseAttrs, AuxDACFn};
 use num_traits::FromPrimitive;
 use thiserror::Error;
 
@@ -65,7 +65,9 @@ macro_rules! dacvoltages_ok {
 #[derive(Error, Debug)]
 pub enum InstructionError {
     #[error("Invalid DAC composition at DAC-: {0} DAC+: {1}")]
-    InvalidDACComposition(u16, u16)
+    InvalidDACComposition(u16, u16),
+    #[error("CREF and CSET must be both set and within 1.5 V of each other")]
+    InvalidCREFCSETCombination,
 }
 
 
@@ -503,6 +505,72 @@ impl SetDAC {
         }
 
 
+        Ok(result)
+    }
+
+
+    /// Set values for the auxiliarry DACs
+    pub(crate) fn from_channels_aux(input: &[(AuxDACFn, f32)])
+        -> Result<Vec<Self>, InstructionError> {
+
+        // This will hold at most 3 values, a SetDAC to clear, a DACRange
+        // and the actual SetDAC
+        let mut result: Vec<SetDAC> = Vec::with_capacity(3usize);
+
+        // all AUX channels (except for LGC) live on AUX0
+        let mask = DACMask::AUX0;
+
+        let mut voltages = DACVoltage::new();
+
+        // we need to ensure that CSET and CREF are within 1V of
+        // each other and also that if one is set the other one
+        // is too
+        let mut cset: Option<f32> = None;
+        let mut cref: Option<f32> = None;
+
+        for (idx, voltage) in input {
+
+            match idx {
+                AuxDACFn::CSET => {
+                    cset = Some(*voltage)
+                },
+                AuxDACFn::CREF => {
+                    cref = Some(*voltage)
+                },
+                _ => {}
+            }
+
+            // get one of the four DACs that corresponds to the
+            // selected idx - remember the DAC voltages are
+            // addressed as half words, so we need to find the
+            // DAC which corresponds to half-word #idx
+            let dac_idx = (*idx as usize) / 2usize;
+
+            if idx.is_lower() { // lower 16 bits
+                voltages.set_lower(dac_idx, vidx!(*voltage));
+            } else { // upper 16 bits
+                voltages.set_upper(dac_idx, vidx!(*voltage));
+            }
+        }
+
+
+        // Don't bother to check CSET and CREF if both are not selected
+        if !(cset.is_none() && cref.is_none()) {
+            // If CSET is set but not CREF (or the other way around) throw
+            // an error - both or none must be set
+            let csetv = cset.ok_or(InstructionError::InvalidCREFCSETCombination)?;
+            let crefv = cref.ok_or(InstructionError::InvalidCREFCSETCombination)?;
+
+            // Throw an error if CSET and CREF are more than 1 V apart
+            if (csetv - crefv).abs() > 1.5 {
+                return Err(InstructionError::InvalidCREFCSETCombination);
+            }
+
+            // If we reached this point without InstructionError we're good!
+
+        }
+
+        result.push(SetDAC::with_regs_unchecked(&mask, &voltages));
         Ok(result)
     }
 
