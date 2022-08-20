@@ -31,6 +31,7 @@ serial_test = "0.4"
 assert_matches = "1.5"
 
 [features]
+default = ['flag_addresses']
 # enable flag addresses to check data validity
 flag_addresses = []
 # enable this to run hardware tests with cargo test
