@@ -6,7 +6,6 @@ use std::sync::mpsc::{channel, Sender, Receiver, TryRecvError};
 #[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 use beastlink as bl;
 
-use ndarray::{Array, Ix1, Ix2};
 use thiserror::Error;
 use spin_sleep;
 
@@ -1177,25 +1176,6 @@ impl Instrument {
         Ok(res)
     }
 
-    /// Same as [`Instrument::read_slice_masked`] but returning an [`Array`][`ndarray::Array`]
-    /// for numpy compatibility
-    pub fn read_slice_masked_as_ndarray(&mut self, chan: usize, mask: &[usize], vread: f32) ->
-        Result<Array<f32, Ix1>, ArC2Error> {
-
-        let data = self.read_slice_masked(chan, mask, vread)?;
-        Ok(Array::from(data))
-
-    }
-
-    /// Same as [`Instrument::read_slice`] but returning an [`Array`][`ndarray::Array`]
-    /// for numpy compatibility
-    pub fn read_slice_as_ndarray(&mut self, chan: usize, vread: f32) -> Result<Array<f32, Ix1>, ArC2Error> {
-
-        let data = self.read_slice(chan, vread)?;
-
-        Ok(Array::from(data))
-    }
-
     /// Read all the available crosspoints at the specified voltage
     ///
     /// This function will read all available crosspoints on the array. This can be done
@@ -1220,15 +1200,6 @@ impl Instrument {
 
         Ok(results)
 
-    }
-
-    /// Same as [`Instrument::read_all()`] but represented as a 2D [`Array`][`ndarray::Array`].
-    pub fn read_all_as_ndarray(&mut self, vread: f32, order: BiasOrder) -> Result<Array<f32, Ix2>, ArC2Error> {
-
-        let data = self.read_all(vread, order)?;
-
-        // we know the size is correct so we can unwrap safely here
-        Ok(Array::from_shape_vec((32, 32), data).unwrap())
     }
 
     /// Check if the FPGA FIFO buffer is busy. The FPGA's FIFO buffer is regarded as busy
@@ -1926,13 +1897,6 @@ impl Instrument {
         }
 
     }
-    /// Pulse and read a slice but returning an [`Array`][`ndarray::Array`] for
-    /// numpy compatibility
-    pub fn pulseread_slice_as_ndarray(&mut self, chan: usize, vpulse: f32,
-        nanos: u128, vread: f32) -> Result<Array<f32, Ix1>, ArC2Error> {
-        let data = self.pulseread_slice(chan, vpulse, nanos, vread)?;
-        Ok(Array::from(data))
-    }
 
     /// Pulse and immediately read all crosspoints. Semantics and arguments follow the same
     /// conventions as [`Instrument::read_all`] and [`Instrument::pulse_all'].
@@ -1988,15 +1952,6 @@ impl Instrument {
 
     }
 
-    /// Pulse and read all crosspoints but returning an [`Array`][`ndarray::Array`]
-    /// for numpy compatibility
-    pub fn pulseread_all_as_ndarray(&mut self, vpulse: f32, nanos: u128,
-        vread: f32, order: BiasOrder) -> Result<Array<f32, Ix2>, ArC2Error> {
-
-        let data = self.pulseread_all(vpulse, nanos, vread, order)?;
-        Ok(Array::from_shape_vec((32, 32), data).unwrap())
-    }
-
     /// Pulse and read the specified high channels that have `chan` as the low potential channel.
     /// Semantics and arguments follow the same conventions as [`Instrument::read_slice_masked`]
     /// and [`Instrument::pulse_slice_masked`].
@@ -2042,14 +1997,6 @@ impl Instrument {
 
         Ok(res)
 
-    }
-
-    /// Pulse and read the specified high channels that have `chan` as the low potential channel,
-    /// returning an ndarray for numpy compatibility
-    pub fn pulseread_slice_masked_as_ndarray(&mut self, chan: usize, mask: &[usize], vpulse: f32,
-        nanos: u128, vread: f32) -> Result<Array<f32, Ix1>, ArC2Error> {
-        let data = self.pulseread_slice_masked(chan, mask, vpulse, nanos, vread)?;
-        Ok(Array::from(data))
     }
 
     /// Set control mode for daughterboards
@@ -2135,12 +2082,14 @@ impl Instrument {
             return Err(ArC2Error::RampOperationError(vstart, vstop, vstep));
         }
 
-        // make the voltage list
-        let voltages = Array::range(vstart, vstop, vstep);
+        // determine the number of steps
+        let steps = f32::ceil((vstop - vstart)/vstep) as usize;
 
         let sender = self._sender.clone();
 
-        for v in &voltages {
+        for idx in 0..steps {
+
+            let v = vstart + vstep*(idx as f32);
 
             // if num pulses is 0 then no pulsing will be done, only reads
             if num_pulses == 0 {
@@ -2150,7 +2099,7 @@ impl Instrument {
                 // the convention is followed even in this unusual scenario.
                 match read_after {
                     ReadAfter::Pulse => {
-                        let chunk = __do_read(self, low, high, &read_at, *v)?;
+                        let chunk = __do_read(self, low, high, &read_at, v)?;
                         match sender.send(Some(chunk)) {
                             Ok(()) => {},
                             Err(err) => { return Err(ArC2Error::from(err)); }
@@ -2165,10 +2114,10 @@ impl Instrument {
             for pidx in 0..num_pulses {
 
                 if pw_nanos < 500_000_000u128 {
-                    self.pulse_one_fast(low, high, *v, pw_nanos)?
+                    self.pulse_one_fast(low, high, v, pw_nanos)?
                         .ground_all_fast()?;
                 } else {
-                    self.pulse_one_slow(low, high, *v, pw_nanos)?
+                    self.pulse_one_slow(low, high, v, pw_nanos)?
                         .ground_all_fast()?;
                 }
 
@@ -2198,7 +2147,7 @@ impl Instrument {
                     ReadAfter::Never => { unreachable!(); }
                 };
 
-                let chunk = __do_read(self, low, high, &read_at, *v)?;
+                let chunk = __do_read(self, low, high, &read_at, v)?;
                 match sender.send(Some(chunk)) {
                     Ok(()) => {},
                     Err(err) => { return Err(ArC2Error::from(err)); }
@@ -2211,9 +2160,10 @@ impl Instrument {
 
         // if we are doing read after ramp, do it here as the ramp is finished now
         if read_after.is_at_ramp() {
-            // take the last value of the voltage list
-            let voltage = voltages.as_slice().unwrap().last().unwrap();
-            let chunk = __do_read(self, low, high, &read_at, *voltage)?;
+            // take the last value of the voltage list, lists are always [start, stop)
+            // so substract 1 from steps to get the last value
+            let voltage = vstart + vstep*((steps-1) as f32);
+            let chunk = __do_read(self, low, high, &read_at, voltage)?;
             match sender.send(Some(chunk)) {
                 Ok(()) => {},
                 Err(err) => { return Err(ArC2Error::from(err)); }
