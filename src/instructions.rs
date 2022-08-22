@@ -446,6 +446,12 @@ impl SetDAC {
 
         let mut result: Vec<SetDAC> = Vec::new();
 
+        // This is the base voltage. If clear == True this will be used to reset
+        // all ArC TWO channels at this base voltage before proceeding. It will
+        // also be used to compare instructions against a know state so that we
+        // do not duplicate them. If clear == False this value will still be
+        // used as a filler value for the unselected channels but it will have
+        // no effect otherwise.
         let (low, high) = (base.0, base.1);
 
         // This will complain if low > high+1
@@ -457,25 +463,33 @@ impl SetDAC {
         let mut bucket: HashMap<[u32; 4], Vec<u16>> = HashMap::new();
         let mut keys: Vec<[u32; 4]> = Vec::with_capacity(64);
 
-        for (idx, low, high) in input {
-            channels[*idx as usize] = (*low, *high);
+        for (idx, clow, chigh) in input {
+            channels[*idx as usize] = (*clow, *chigh);
         }
 
 
         for (idx, chunk) in channels.chunks(4usize).enumerate() {
 
-            let unchanged: bool = {
-                let mut res = true;
-                for (clow, chigh) in chunk {
-                    if *clow != low || *chigh != high {
-                        res = false;
-                        break;
+            // if we are using a base voltage (clear == True) check if whole
+            // half-clusters are already at base voltage, no reason to emit a LD
+            // VOLT instruction if they are already at proper state. If base
+            // voltage is not used (clear == False) then there's no point to run
+            // this check as the channels might be at an indeterminate state so
+            // comparing them against a base voltage is pointless
+            if clear {
+                let unchanged: bool = {
+                    let mut res = true;
+                    for (clow, chigh) in chunk {
+                        if *clow != low || *chigh != high {
+                            res = false;
+                            break;
+                        }
                     }
-                }
-                res
-            };
+                    res
+                };
 
-            if unchanged { continue; }
+                if unchanged { continue; }
+            }
 
             let key = {
                 let mut res: [u32; 4] = [0x80008000; 4];
