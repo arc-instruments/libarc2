@@ -22,42 +22,49 @@ mod wordreg {
     }
 
     /// One word
+    #[derive(Clone, Debug)]
     pub struct Wx1;
     impl WordSize for Wx1 {
         const WORDS: usize = 1;
     }
 
     /// Two words
+    #[derive(Clone, Debug)]
     pub struct Wx2;
     impl WordSize for Wx2 {
         const WORDS: usize = 2;
     }
 
     /// Three words
+    #[derive(Clone, Debug)]
     pub struct Wx3;
     impl WordSize for Wx3 {
         const WORDS: usize = 3;
     }
 
     /// Four words
+    #[derive(Clone, Debug)]
     pub struct Wx4;
     impl WordSize for Wx4 {
         const WORDS: usize = 4;
     }
 
     /// Five words
+    #[derive(Clone, Debug)]
     pub struct Wx5;
     impl WordSize for Wx5 {
         const WORDS: usize = 5;
     }
 
     /// Six words
+    #[derive(Clone, Debug)]
     pub struct Wx6;
     impl WordSize for Wx6 {
         const WORDS: usize = 6;
     }
 
     /// Seven words
+    #[derive(Clone, Debug)]
     pub struct Wx7;
     impl WordSize for Wx7 {
         const WORDS: usize = 7;
