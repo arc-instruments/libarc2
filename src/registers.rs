@@ -824,7 +824,7 @@ mod dacmask_tests {
 /// Channel configurations currently supported by ArC2.
 /// Use these with [`ChannelConf`] to control
 /// individual ArC2 channels.
-#[derive(Clone, Copy, FromPrimitive, Debug)]
+#[derive(Clone, PartialEq, Copy, FromPrimitive, Debug)]
 #[repr(u8)]
 pub enum ChannelState {
     /// Keep current state
@@ -1430,6 +1430,7 @@ mod dacvoltage_tests {
 
 
 /// A generic bitmask of the specified word size
+#[derive(Clone, Debug)]
 pub struct U32Mask<T> {
     _words: T,
     bits: BitVec<u32, Msb0>,
@@ -1560,6 +1561,8 @@ impl U32Mask<wordreg::Wx4> {
 /// methods.
 ///
 /// ## Example
+///
+/// ### Toggling individual channels
 /// ```
 /// use libarc2::registers::{ChanMask, ToU32s};
 ///
@@ -1576,6 +1579,19 @@ impl U32Mask<wordreg::Wx4> {
 /// // u32 representation
 /// assert_eq!(chan.as_u32s(), &[0x40000000, 0x80000001]);
 /// ```
+/// ### Creating a mask from a set of indices
+/// ```
+/// use libarc2::registers::{ChanMask, ToU32s};
+///
+/// let channels: Vec<usize> = vec![0, 7, 45];
+/// let chan = ChanMask::from_indices(&channels);
+/// assert_eq!(chan.get_enabled(0), true);
+/// assert_eq!(chan.get_enabled(7), true);
+/// assert_eq!(chan.get_enabled(45), true)
+///
+/// ```
+///
+///
 pub type ChanMask = U32Mask<wordreg::Wx2>;
 
 impl ChanMask {
