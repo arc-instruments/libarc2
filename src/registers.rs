@@ -109,7 +109,10 @@ pub(crate) mod consts {
     ];
 
     pub(super) const CHANCONFSIZE: usize = 2;
+    pub(super) const AUXNCHANS: usize = 16;
     pub(super) const NCHANS: usize = 64;
+    // 2 bits per channel for range config (upper and lower voltages)
+    pub(super) const RANGCONFSIZE: usize = 2;
 }
 
 #[derive(Error, Debug)]
@@ -216,6 +219,33 @@ impl AuxDACFn {
     /// instruction - See the protocol document for more
     pub(crate) fn is_lower(&self) -> bool {
         (*self as usize) % 2 != 0
+    }
+}
+
+
+
+/// Output range for the DAC RNG instruction. There are only two options:
+/// (a) [`OutputRange::STD`] standard ± 10 V range (at 300 μV precision)
+/// or (b) [`OutputRange::EXT`] extended ± 20 V range (at 600 μV precision)
+#[derive(Copy, Clone, Eq)]
+pub struct OutputRange(bool);
+
+impl OutputRange {
+    /// Standard output range ± 10 V - 300 μV precision
+    pub const STD: OutputRange = Self(false);
+    /// Extended output range ± 20 V - 600 μV precision
+    pub const EXT: OutputRange = Self(true);
+}
+
+impl PartialEq for OutputRange {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl PartialEq<bool> for OutputRange {
+    fn eq(&self, other: &bool) -> bool {
+        self.0 == *other
     }
 }
 
@@ -1564,6 +1594,105 @@ impl ChanMask {
     }
 
 }
+
+/// Register used to construct an appropriate range selection
+/// bitmask for all available DACs on ArC TWO. For differential
+/// biasing both DAC halves of each individual channel can be
+/// ranged independently.
+///
+/// ## Examples
+/// ```
+/// use libarc2::registers::{RangeMask, OutputRange, AuxDACFn, ToU32s};
+///
+/// // Create a new mask, all channels at standard range
+/// let mut mask = RangeMask::new();
+///
+/// // Set the 8th channel to extended range
+/// mask.set_lower(7usize, OutputRange::EXT);
+///
+/// // Set the SELH Aux function to extended range
+/// mask.set_aux(AuxDACFn::SELH, OutputRange::EXT);
+///
+/// // Set the logic level range to extended
+/// mask.set_logic(OutputRange::EXT);
+///
+/// assert_eq!(mask.as_u32s(), [0x00000801, 0x00000000, 0x00000000,
+///     0x00000000, 0x00004000])
+/// ```
+pub struct RangeMask {
+    bits: BitVec<u32, Msb0>,
+}
+
+impl RangeMask {
+
+    // The virtual channel that corresponds to
+    // the LGC range bit in the AUX1 DAC
+    const LGC_VCHANNEL: usize = 70;
+
+    pub fn new() -> RangeMask {
+
+        // due to the issue LS bits and MS bytes we ensure that the
+        // underlying bytes are full 5 u32s long. The upper 16 bits
+        // will always be empty
+        let size: usize = consts::NCHANS*consts::RANGCONFSIZE + consts::AUXNCHANS;
+        let nbits = std::mem::size_of::<u32>()*8;
+        let words = if size % nbits == 0 {
+            size / nbits
+        } else {
+            size / nbits + 1
+        };
+        let vec: BitVec<u32, Msb0> = BitVec::repeat(false, words*nbits);
+
+        RangeMask { bits: vec }
+    }
+
+    /// Set the range for both upper and lower half of the specified channel
+    pub fn set(&mut self, idx: usize, range: OutputRange) {
+        self.set_upper(idx, range);
+        self.set_lower(idx, range);
+    }
+
+    pub fn set_aux(&mut self, func: AuxDACFn, range: OutputRange) {
+        // 0, 1 → 64 | 2, 3 → 65 | 4, 5 → 66 | 6, 7 → 67
+        // L, U      | L, U      | L, U      | L, U
+
+        // this finds the "virtual" channel idx of the aux fn
+        let aux_chan: usize = consts::NCHANS + (func as usize)/2usize;
+
+        if func.is_lower() {
+            self.set_lower(aux_chan, range);
+        } else {
+            self.set_upper(aux_chan, range);
+        }
+    }
+
+    pub fn set_logic(&mut self, range: OutputRange) {
+        self.set_upper(Self::LGC_VCHANNEL, range);
+    }
+
+    /// Set the range for the upper half of the specified channel
+    pub fn set_upper(&mut self, idx: usize, range: OutputRange) {
+
+        let actual_idx: usize = self.bits.len() - 1 - idx*consts::RANGCONFSIZE;
+        self.bits.set(actual_idx+1, range.0);
+    }
+
+    /// Set the range for the lower half of the specified channel
+    pub fn set_lower(&mut self, idx: usize, range: OutputRange) {
+
+        let actual_idx: usize = self.bits.len() - 1 - idx*consts::RANGCONFSIZE;
+        self.bits.set(actual_idx, range.0);
+    }
+
+}
+
+impl ToU32s for RangeMask {
+    fn as_u32s(&self) -> Vec<u32> {
+        let bits = self.bits.as_raw_slice();
+        bits.to_vec()
+    }
+}
+
 
 /// Averaging for read operations
 #[derive(Clone, Copy, FromPrimitive, ToPrimitive, Debug)]
