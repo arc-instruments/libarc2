@@ -625,20 +625,20 @@ bitflags! {
     ///
     /// assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH48_51 |
     ///     DACMask::CH60_63);
-    /// assert_eq!(clusters.as_u32(), 0x00009001);
+    /// assert_eq!(u32::from(&clusters), 0x00009001);
     /// clusters.set_channel(12);
     /// assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH12_15 |
     ///     DACMask::CH48_51 | DACMask::CH60_63);
-    /// assert_eq!(clusters.as_u32(), 0x00009009);
+    /// assert_eq!(u32::from(&clusters), 0x00009009);
     ///
     /// clusters.unset_channel(61);
     /// assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH12_15 |
     ///     DACMask::CH48_51);
-    /// assert_eq!(clusters.as_u32(), 0x00001009);
+    /// assert_eq!(u32::from(&clusters), 0x00001009);
     ///
     /// clusters.clear();
     /// assert_eq!(clusters, DACMask::NONE);
-    /// assert_eq!(clusters.as_u32(), 0x0);
+    /// assert_eq!(u32::from(&clusters), 0x0);
     /// ```
     pub struct DACMask: u32 {
         /// No Flags; invalid state
@@ -738,10 +738,6 @@ impl DACMask {
         self.bits = 0;
     }
 
-    /// Get the representation of this bitmas ask u32.
-    pub fn as_u32(&self) -> u32 {
-        u32::from(self)
-    }
 }
 
 impl From<&DACMask> for u32 {
@@ -752,7 +748,7 @@ impl From<&DACMask> for u32 {
 
 impl ToU32s for DACMask {
     fn as_u32s(&self) -> Vec<u32> {
-        [self.as_u32()].to_vec()
+        [u32::from(self)].to_vec()
     }
 }
 
@@ -768,21 +764,21 @@ mod dacmask_tests {
         clusters.set_channels(&[2, 3, 50, 61]);
         assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH48_51 |
             DACMask::CH60_63);
-        assert_eq!(clusters.as_u32(), 0x00009001);
+        assert_eq!(u32::from(&clusters), 0x00009001);
 
         clusters.set_channel(12);
         assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH12_15 |
             DACMask::CH48_51 | DACMask::CH60_63);
-        assert_eq!(clusters.as_u32(), 0x00009009);
+        assert_eq!(u32::from(&clusters), 0x00009009);
 
         clusters.unset_channel(61);
         assert_eq!(clusters, DACMask::CH00_03 | DACMask::CH12_15 |
             DACMask::CH48_51);
-        assert_eq!(clusters.as_u32(), 0x00001009);
+        assert_eq!(u32::from(&clusters), 0x00001009);
 
         clusters.clear();
         assert_eq!(clusters, DACMask::NONE);
-        assert_eq!(clusters.as_u32(), 0x0);
+        assert_eq!(u32::from(&clusters), 0x0);
 
     }
 }
