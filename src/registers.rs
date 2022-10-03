@@ -1450,7 +1450,7 @@ impl<T: wordreg::WordSize> U32Mask<T> {
 
 }
 
-// Used to create the `from_vals` function of U32Mask<T>
+// Used to create the `from_vals` and `from_indices` function of U32Mask<T>
 macro_rules! make_from_values_impl {
     ($ws:ty, $wx:expr) => {
         /// Create a new [`U32Mask`] from a series of `u32s`.
@@ -1461,6 +1461,18 @@ macro_rules! make_from_values_impl {
             }
 
             U32Mask { _words: $wx, bits: vec }
+        }
+
+        /// Create a new [`U32Mask`] from a series of selected indices
+        pub fn from_indices(chans: &[usize]) -> U32Mask<$ws> {
+            let mut mask = Self::new();
+
+            for c in chans {
+                if *c >= <$ws>::WORDS*32 { continue; }
+                mask.set_enabled(*c, true);
+            }
+
+            mask
         }
     }
 }
