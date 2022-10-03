@@ -1428,6 +1428,44 @@ mod dacvoltage_tests {
 }
 
 
+bitflags! {
+    /// Channel selector for DAC half-clusters
+    ///
+    /// [`DACVoltageMask`] is used to create a bitmask that limits
+    /// the application of a [`SetDAC`][`crate::instructions::SetDAC`]
+    /// instruction to one or more channels. Typically ArC2 will apply
+    /// the configured voltages to all four channels of a DAC half-cluster
+    /// but this can be limited to specific channels if a suitable
+    /// [`DACVoltageMask`] is supplied.
+    pub struct DACVoltageMask: u32 {
+        /// Select no channels
+        const NONE = 0b00000000000000000000000000000000;
+        /// Channel 0
+        const CH0  = 0b00000000000000000000000000000001;
+        /// Channel 1
+        const CH1  = 0b00000000000000000000000000000010;
+        /// Channel 3
+        const CH2  = 0b00000000000000000000000000000100;
+        /// Channel 4
+        const CH3  = 0b00000000000000000000000000001000;
+        /// Select all channels
+        const ALL  = Self::CH0.bits | Self::CH1.bits |
+                     Self::CH2.bits | Self::CH3.bits;
+    }
+}
+
+impl From<&DACVoltageMask> for u32 {
+    fn from(mask: &DACVoltageMask) -> u32 {
+        mask.bits() as u32
+    }
+}
+
+impl ToU32s for DACVoltageMask {
+    fn as_u32s(&self) -> Vec<u32> {
+        [u32::from(self)].to_vec()
+    }
+}
+
 
 /// A generic bitmask of the specified word size
 #[derive(Clone, Debug)]

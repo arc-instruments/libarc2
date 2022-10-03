@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use crate::registers::ToU32s;
 use crate::registers::Terminate;
-use crate::registers::{OpCode, Empty, DACMask, DACVoltage};
+use crate::registers::{OpCode, Empty, DACMask, DACVoltage, DACVoltageMask};
 use crate::registers::{ChannelConf, SourceConf, ChannelState};
 use crate::registers::{IOEnable, IOMask, ChanMask, Averaging};
 use crate::registers::{Duration50, Address, HSDelay, DACCluster};
@@ -235,15 +235,15 @@ impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs, "UP DAC
 /// ## Instruction layout
 ///
 /// ```text
-///        +--------+----------+--------+--------+------------+
-///        | OpCode |  DACMask |  Empty |  Empty | DACVoltage |
-///        +--------+----------+--------+--------+------------+
-/// Words:     1         1         1        1          4
+///        +--------+----------+--------+----------------+------------+
+///        | OpCode |  DACMask |  Empty | DACVoltageMask | DACVoltage |
+///        +--------+----------+--------+----------------+------------+
+/// Words:     1         1         1            1              4
 /// ```
 ///
 /// ## Example
 /// ```
-/// use libarc2::registers::{DACMask, DACVoltage, ToU32s};
+/// use libarc2::registers::{DACMask, DACVoltageMask, DACVoltage, ToU32s};
 /// use libarc2::instructions::{SetDAC, Instruction};
 ///
 /// // Enable first two half channels (8 channels)
@@ -265,10 +265,10 @@ impl Instruction for UpdateDAC { make_vec_instr_impl!(UpdateDAC, instrs, "UP DAC
 /// voltages.set_upper(3, 0xFFFF);
 /// voltages.set_lower(3, 0x9000);
 ///
-/// let mut instr = SetDAC::with_regs(&mask, &voltages).unwrap();
+/// let mut instr = SetDAC::with_regs(&mask, &voltages, &DACVoltageMask::ALL).unwrap();
 ///
 /// assert_eq!(instr.compile().view(),
-///     &[0x1, 0x3, 0x0, 0x0, 0x80000000, 0x80008000,
+///     &[0x1, 0x3, 0x0, 0x0000000F, 0x80000000, 0x80008000,
 ///       0x90008000, 0xFFFF9000, 0x80008000]);
 /// ```
 pub struct SetDAC {
@@ -293,7 +293,7 @@ impl SetDAC {
         instr.push_register(&OpCode::SetDAC);
         instr.push_register(&DACMask::ALL);
         instr.push_register(&Empty::new());
-        instr.push_register(&Empty::new());
+        instr.push_register(&DACVoltageMask::ALL);
         instr.push_register(&DACVoltage::new());
 
         instr
@@ -311,7 +311,7 @@ impl SetDAC {
         instr.push_register(&OpCode::SetDAC);
         instr.push_register(&DACMask::ALL);
         instr.push_register(&Empty::new());
-        instr.push_register(&Empty::new());
+        instr.push_register(&DACVoltageMask::ALL);
         instr.push_register(&DACVoltage::new_at_levels(low, high));
 
         Ok(instr)
@@ -327,7 +327,7 @@ impl SetDAC {
         instr.push_register(&OpCode::SetDAC);
         instr.push_register(&DACMask::AUX1);
         instr.push_register(&Empty::new());
-        instr.push_register(&Empty::new());
+        instr.push_register(&DACVoltageMask::ALL);
 
         let mut voltages = DACVoltage::new();
         voltages.set_upper(0, 0x0000);
@@ -347,7 +347,7 @@ impl SetDAC {
     }
 
     /// Create a new instruction with specified registers
-    pub fn with_regs(chanmask: &DACMask, voltages: &DACVoltage) ->
+    pub fn with_regs(chanmask: &DACMask, voltages: &DACVoltage, voltmask: &DACVoltageMask) ->
         Result<Self, InstructionError> {
 
         for idx in 0..voltages.len() {
@@ -360,18 +360,18 @@ impl SetDAC {
 
         }
 
-        Ok(SetDAC::with_regs_unchecked(chanmask, voltages))
+        Ok(SetDAC::with_regs_unchecked(chanmask, voltages, voltmask))
     }
 
     /// Create a new instruction with specific registers - no DAC+/DAC- check
     /// This is only used internally - never, ever call this function unless
     /// you know what you're doing
-    fn with_regs_unchecked(chanmask: &DACMask, voltages: &DACVoltage) -> Self {
+    fn with_regs_unchecked(chanmask: &DACMask, voltages: &DACVoltage, voltmask: &DACVoltageMask) -> Self {
         let mut instr = SetDAC::create();
         instr.push_register(&OpCode::SetDAC);
         instr.push_register(chanmask);
         instr.push_register(&Empty::new());
-        instr.push_register(&Empty::new());
+        instr.push_register(voltmask);
         instr.push_register(voltages);
 
         instr
@@ -515,7 +515,8 @@ impl SetDAC {
             let mask = DACMask::from_bits(bits).unwrap();
             let voltages = DACVoltage::from_raw_values(&key);
 
-            result.push(SetDAC::with_regs(&mask, &voltages)?);
+            // TODO: Update this to have more optimal voltage mask allocation
+            result.push(SetDAC::with_regs(&mask, &voltages, &DACVoltageMask::ALL)?);
         }
 
 
@@ -584,7 +585,7 @@ impl SetDAC {
 
         }
 
-        result.push(SetDAC::with_regs_unchecked(&mask, &voltages));
+        result.push(SetDAC::with_regs_unchecked(&mask, &voltages, &DACVoltageMask::ALL));
         Ok(result)
     }
 
@@ -1375,17 +1376,17 @@ mod tests {
         assert_eq!(voltages.as_u32s(),
             &[0x80000000, 0x80008000, 0x90008000, 0xFFFF9999]);
 
-        let mut instr = SetDAC::with_regs(&mask, &voltages).unwrap();
+        let mut instr = SetDAC::with_regs(&mask, &voltages, &DACVoltageMask::ALL).unwrap();
 
         assert_eq!(instr.compile().view(),
-            &[0x1, 0x3, 0x0, 0x0, 0x80000000, 0x80008000,
+            &[0x1, 0x3, 0x0, 0x0000000f, 0x80000000, 0x80008000,
               0x90008000, 0xFFFF9999, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
             &[0x01, 0x00, 0x00, 0x00,
               0x03, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00,
-              0x00, 0x00, 0x00, 0x00,
+              0x0f, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x80,
               0x00, 0x80, 0x00, 0x80,
               0x00, 0x80, 0x00, 0x90,
@@ -1445,14 +1446,14 @@ mod tests {
     fn new_set_dac_3v3_logic() {
         let mut instr = SetDAC::new_3v3_logic();
 
-        assert_eq!(instr.compile().view(), &[0x1, 0x20000, 0x0, 0x0, 0x0,
+        assert_eq!(instr.compile().view(), &[0x1, 0x20000, 0x0, 0xf, 0x0,
             0xeeab0000, 0x0, 0x0, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
             &[0x01, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x02, 0x00,
               0x00, 0x00, 0x00, 0x00,
-              0x00, 0x00, 0x00, 0x00,
+              0x0f, 0x00, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00,
               0x00, 0x00, 0xab, 0xee,
               0x00, 0x00, 0x00, 0x00,
