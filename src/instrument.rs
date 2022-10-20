@@ -292,6 +292,14 @@ pub enum DataMode {
 }
 
 
+/// Type of data to retrieve from a memory read
+#[derive(Clone)]
+pub enum ReadType {
+    Current,
+    Voltage
+}
+
+
 /// Exit condition for long running processes
 #[derive(Clone)]
 pub enum WaitFor {
@@ -698,13 +706,28 @@ impl Instrument {
     }
 
     /// Read a chunk's contents in a word, bit or full mode
-    fn read_chunk(&self, chunk: &mut Chunk, mode: &DataMode) -> Result<Vec<f32>, ArC2Error> {
+    fn read_chunk(&self, chunk: &mut Chunk, mode: &DataMode, rtype: &ReadType) -> Result<Vec<f32>, ArC2Error> {
 
-        let ret: Vec<f32> = match mode {
-            DataMode::Words => self.word_currents_from_address(chunk.addr())?,
-            DataMode::Bits => self.bit_currents_from_address(chunk.addr())?,
-            DataMode::All => {
-                self.currents_from_address(chunk.addr(), &ALL_CHANS)?
+
+
+        let ret: Vec<f32> = match rtype {
+            ReadType::Current => {
+                match mode {
+                    DataMode::Words => self.word_currents_from_address(chunk.addr())?,
+                    DataMode::Bits => self.bit_currents_from_address(chunk.addr())?,
+                    DataMode::All => {
+                        self.currents_from_address(chunk.addr(), &ALL_CHANS)?
+                    }
+                }
+            },
+            ReadType::Voltage => {
+                match mode {
+                    DataMode::Words => self.word_voltages_from_address(chunk.addr())?,
+                    DataMode::Bits => self.bit_voltages_from_address(chunk.addr())?,
+                    DataMode::All => {
+                        self.voltages_from_address(chunk.addr(), &ALL_CHANS)?
+                    }
+                }
             }
         };
 
@@ -1176,7 +1199,7 @@ impl Instrument {
 
         self.wait();
 
-        let res = self.read_chunk(&mut chunk, &DataMode::All)?;
+        let res = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Current)?;
 
         Ok(res)
     }
@@ -1197,7 +1220,7 @@ impl Instrument {
         self.wait();
 
         // Read the requested chunk...
-        let res = self.read_chunk(&mut chunk, &DataMode::All)?;
+        let res = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Current)?;
 
         // ... and return only the requested channel
         Ok(res[high])
@@ -1224,7 +1247,7 @@ impl Instrument {
             // ... and finally withdraw voltage from the biasing channels
             self.ground_all_fast()?.execute()?;
             self.wait();
-            res = self.read_chunk(&mut chunk, &DataMode::Words)?;
+            res = self.read_chunk(&mut chunk, &DataMode::Words, &ReadType::Current)?;
         // Or the other way around. Channels 16..32 and
         // 48..64 correspond to columns so we want to read
         // from all the rows in the column.
@@ -1234,7 +1257,7 @@ impl Instrument {
             // ... and finally withdraw voltage from the biasing channels
             self.ground_all_fast()?.execute()?;
             self.wait();
-            res = self.read_chunk(&mut chunk, &DataMode::Bits)?;
+            res = self.read_chunk(&mut chunk, &DataMode::Bits, &ReadType::Current)?;
         }
 
         Ok(res)
@@ -1283,7 +1306,7 @@ impl Instrument {
         let mut res: Vec<f32> = Vec::with_capacity(32);
 
         // Read the raw chunk of data
-        let data = self.read_chunk(&mut chunk, &DataMode::All)?;
+        let data = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Current)?;
 
         // Convert adc values to current
         for chan in all_channels {
@@ -1318,6 +1341,51 @@ impl Instrument {
 
         for chan in bias_channels {
             results.append(&mut self.read_slice(*chan, vread)?);
+        }
+
+        Ok(results)
+
+    }
+
+
+    /// Do a voltage read on all the selected channels
+    ///
+    /// This function will read the voltage on all specified channels and return their
+    /// values in ascending channel order. Set `avg` to `true` to enable averaging
+    /// but that will increase readout time from 10 to 320 μs
+    pub fn vread_channels(&mut self, uchans: &[usize], avg: bool) -> Result<Vec<f32>, ArC2Error> {
+
+        // first sort the channels
+        let mut chans = uchans.to_vec();
+        chans.sort();
+
+        // Create a new mask and populate it with the specified channels
+        let mut mask = ChanMask::none();
+        for c in &chans {
+            mask.set_enabled(*c, true);
+        }
+
+        let mut chunk = self.make_chunk()?;
+
+        let mut results: Vec<f32> = Vec::with_capacity(chans.len());
+
+        let mut voltageread = VoltageRead::new(&mask, avg, chunk.addr(),
+            chunk.flag_addr(), VALUEAVAILFLAG);
+        self.process(voltageread.compile())?;
+
+        if avg {
+            self.add_delay(320_000)?;
+        } else {
+            self.add_delay(10_000)?;
+        }
+
+        self.execute()?;
+        self.wait();
+
+        let res = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Voltage)?;
+
+        for c in &chans {
+            results.push(res[*c]);
         }
 
         Ok(results)
@@ -1972,7 +2040,7 @@ impl Instrument {
                 .execute()?;
             self.wait();
 
-            let data = self.read_chunk(&mut chunk, &DataMode::All)?;
+            let data = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Current)?;
             Ok(data[high])
 
         } else {
@@ -2009,7 +2077,7 @@ impl Instrument {
             self.ground_all_fast()?
                 .execute()?;
             self.wait();
-            let res = self.read_chunk(&mut chunk, &mode);
+            let res = self.read_chunk(&mut chunk, &mode, &ReadType::Current);
 
             res
         } else {
@@ -2058,7 +2126,7 @@ impl Instrument {
             }
 
             for mut chunk in chunks {
-                let mut data = self.read_chunk(&mut chunk, &mode)?;
+                let mut data = self.read_chunk(&mut chunk, &mode, &ReadType::Current)?;
                 result.append(&mut data);
             }
 
@@ -2101,7 +2169,7 @@ impl Instrument {
             self.wait();
 
             res = Vec::with_capacity(32);
-            let data = self.read_chunk(&mut chunk, &DataMode::All)?;
+            let data = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Current)?;
 
             for chan in all_channels {
                 if all_channels_set.contains(&chan) {
@@ -2391,7 +2459,7 @@ impl Instrument {
     }
 
     /// Read one block of values from the internal buffer
-    pub fn pick_one(&mut self, mode: DataMode) -> Result<Option<Vec<f32>>, ArC2Error> {
+    pub fn pick_one(&mut self, mode: DataMode, rtype: ReadType) -> Result<Option<Vec<f32>>, ArC2Error> {
         let _receiver = self._receiver.clone();
         let receiver = _receiver.lock().unwrap();
 
@@ -2425,7 +2493,7 @@ impl Instrument {
             #[cfg(feature="flag_addresses")]
             self.wait_for_flag(&chunk);
 
-            match self.read_chunk(&mut chunk, &mode) {
+            match self.read_chunk(&mut chunk, &mode, &rtype) {
                 Ok(v) => {
                     return Ok(Some(v));
 
