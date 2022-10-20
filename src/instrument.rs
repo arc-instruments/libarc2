@@ -427,6 +427,47 @@ fn _adc_to_current(val: u32) -> f32 {
 
 }
 
+/// Convert a raw ADC value to a voltage reading
+fn _adc_to_voltage(val: u32) -> f32 {
+
+    let mut bytes = val.to_be_bytes();
+
+    let range = bytes[0];
+
+    if range == 0x01 {
+        // channels hasn't been used
+        return f32::NAN;
+    }
+
+    // replace the first 8 bytes with 0 to simplify things
+    bytes[0] = 0;
+
+    // and reconstruct the ADC output
+    let uval = i32::from_be_bytes(bytes);
+
+    let val: f32;
+    let res: f32;
+
+    // same as in _adc_to_current check if the ADC has
+    // overflowed and subtract 2^{18}
+    if uval > 2i32.pow(17) {
+        val = (uval - 2i32.pow(18)) as f32;
+    } else {
+        val = uval as f32;
+    }
+
+    if range == 0x81 || range == 0x82 || range == 0x84 || range == 0x88 {
+        20.48 * (val / 2.0f32.powf(18.0))
+    } else if range == 0x90 || range == 0xa0 || range == 0xc0 {
+        10.24 * (val / 2.0f32.powf(18.0))
+    } else {
+        // unknown range
+        f32::NAN
+    }
+
+
+}
+
 
 #[cfg(all(any(target_os = "windows", target_os = "linux"), target_arch = "x86_64"))]
 impl Instrument {
@@ -852,6 +893,36 @@ impl Instrument {
 
     }
 
+    /// Retrieve all channel voltages from specific address segment. This function will
+    /// always return a 64-element vector. Non-selected channels will be replaced by
+    /// f32::NAN. The function will panic if a channel number exceeding the highest
+    /// channel (presently 63) is provided or if an invalid base address is selected.
+    /// Base address must be a multiple of 256.
+    pub fn voltages_from_address(&self, addr: u32, chans: &[usize]) -> Result<Vec<f32>, ArC2Error> {
+
+        if addr % 256 != 0 {
+            panic!("Attempted to read voltages from invalid base address");
+        }
+
+        let data = self.read_raw(addr)?;
+        let mut result: Vec<f32> = vec![f32::NAN; 64];
+
+        // Assemble the number from the 4 neighbouring bytes
+        for chan in chans {
+            let val: u32 = u32::from_le_bytes([data[4*chan+0], data[4*chan+1],
+                data[4*chan+2], data[4*chan+3]]);
+
+            if chan % 2 == 0 {
+                result[*chan] = _adc_to_voltage(val);
+            } else {
+                result[*chan] = -1.0*_adc_to_voltage(val);
+            }
+        }
+
+        Ok(result)
+
+    }
+
     /// Retrieve all wordline currents from specific address segment. This function will
     /// always return a 32-element vector. The function will panic if an invalid base
     /// address is provided. Base address must be a multiple of 256.
@@ -878,6 +949,32 @@ impl Instrument {
         Ok(result)
     }
 
+    /// Retrieve all wordline voltages from specific address segment. This function will
+    /// always return a 32-element vector. The function will panic if an invalid base
+    /// address is provided. Base address must be a multiple of 256.
+    pub fn word_voltages_from_address(&self, addr: u32) -> Result<Vec<f32>, ArC2Error> {
+
+        if addr % 256 != 0 {
+            panic!("Attempted to read voltages from invalid base address");
+        }
+
+        let data = self.read_raw(addr)?;
+        let mut result: Vec<f32> = Vec::with_capacity(32);
+
+        for chan in &*ALL_WORDS {
+            let val: u32 = u32::from_le_bytes([data[4*chan+0], data[4*chan+1],
+                data[4*chan+2], data[4*chan+3]]);
+
+            if chan % 2 == 0 {
+                result.push(_adc_to_voltage(val));
+            } else {
+                result.push(-1.0*_adc_to_voltage(val));
+            }
+        }
+
+        Ok(result)
+    }
+
     /// Retrieve all bitline currents from specific address segment. This function will
     /// always return a 32-element vector.
     pub fn bit_currents_from_address(&self, addr: u32) -> Result<Vec<f32>, ArC2Error> {
@@ -897,6 +994,31 @@ impl Instrument {
                 result.push(_adc_to_current(val));
             } else {
                 result.push(-1.0*_adc_to_current(val));
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Retrieve all bitline voltages from specific address segment. This function will
+    /// always return a 32-element vector.
+    pub fn bit_voltages_from_address(&self, addr: u32) -> Result<Vec<f32>, ArC2Error> {
+
+        if addr % 256 != 0 {
+            panic!("Attempted to read voltages from invalid base address");
+        }
+
+        let data = self.read_raw(addr)?;
+        let mut result: Vec<f32> = Vec::with_capacity(32);
+
+        for chan in &*ALL_BITS {
+            let val: u32 = u32::from_le_bytes([data[4*chan+0], data[4*chan+1],
+                data[4*chan+2], data[4*chan+3]]);
+
+            if chan % 2 == 0 {
+                result.push(_adc_to_voltage(val));
+            } else {
+                result.push(-1.0*_adc_to_voltage(val));
             }
         }
 
