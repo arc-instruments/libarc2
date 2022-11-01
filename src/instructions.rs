@@ -614,10 +614,10 @@ impl Instruction for SetDAC { make_vec_instr_impl!(SetDAC, instrs, "LD VOLT"); }
 /// ## Instruction layout
 ///
 /// ```text
-///        +--------+-------------+---------------+
-///        | OpCode |  SourceConf |  ChannelConf  |
-///        +--------+-------------+---------------+
-/// Words:     1            1             6
+///        +--------+-------------+-------+-------+---------------+
+///        | OpCode |  SourceConf | Empty | Empty |  ChannelConf  |
+///        +--------+-------------+-------+-------+---------------+
+/// Words:     1            1         1       1           4
 /// ```
 ///
 /// ## Example
@@ -699,20 +699,24 @@ impl UpdateChannel {
         Self::from_regs_default_source(&conf)
     }
 
-    /// Alter the instruction's channel configuration.
-    pub fn set_channel_conf(&mut self, conf: &ChannelConf) {
-        let chan_conf = conf.as_u32s();
-        for (idx, num) in chan_conf.iter().enumerate() {
-            self.instrs[idx+2] = *num;
-        }
-    }
-
-    /// Alter the instruction's current source configuration.
-    pub fn set_source_conf(&mut self, conf: &SourceConf) {
-        let chan_conf = conf.as_u32s();
-        for (idx, num) in chan_conf.iter().enumerate() {
-            self.instrs[idx+1] = *num;
-        }
+    /// Generate a [`mask`][`ChanMask`] that contains all channels
+    /// at the specified channel state.
+    ///
+    /// ```
+    /// use libarc2::instructions::*;
+    /// use libarc2::registers::*;
+    ///
+    /// let mut conf = ChannelConf::new();
+    /// conf.set(3, ChannelState::VoltArb);
+    /// conf.set(19, ChannelState::VoltArb);
+    /// let upch = UpdateChannel::from_regs_default_source(&conf);
+    ///
+    /// let mask = upch.mask(ChannelState::VoltArb);
+    ///
+    /// assert_eq!(mask.as_slice(), &[0x00000000, 0x00080008]);
+    /// ```
+    pub fn mask(&self, val: ChannelState) -> ChanMask {
+        ChannelConf::from_raw_words(&self.instrs[4..8]).mask(val)
     }
 
 }

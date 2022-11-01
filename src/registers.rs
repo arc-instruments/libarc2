@@ -974,6 +974,19 @@ impl ChannelConf {
         conf
     }
 
+    /// Create a new register from raw words. This is only meant
+    /// to be used when reconstucting ChannelConfs from existing
+    /// instructions and not when creating a new register from
+    /// scratch.
+    #[doc(hidden)]
+    pub(crate) fn from_raw_words(words: &[u32]) -> ChannelConf {
+        let size = consts::NCHANS * consts::CHANCONFSIZE;
+        let mut vec: BitVec<u32, Msb0> = BitVec::with_capacity(size);
+        vec.extend_from_raw_slice(words);
+
+        ChannelConf { bits: vec }
+    }
+
     /// Set a channel to a [`ChannelState`] value
     pub fn set(&mut self, idx: usize, val: ChannelState) {
         let bits = self.bits.as_mut_bitslice();
@@ -1009,6 +1022,36 @@ impl ChannelConf {
         for i in 0..nchannels {
             self.set(i, val);
         }
+    }
+
+    /// Generate a [`mask`][`ChanMask`] that contains all channels
+    /// at the specified channel state. This is typically done through
+    /// the [`UpdateChannel`][`crate::instruction::UpdateChannel`]
+    /// instruction.
+    ///
+    /// ```
+    /// use libarc2::instructions::*;
+    /// use libarc2::registers::*;
+    ///
+    /// let mut conf = ChannelConf::new();
+    /// conf.set(3, ChannelState::VoltArb);
+    /// conf.set(19, ChannelState::VoltArb);
+    /// let upch = UpdateChannel::from_regs_default_source(&conf);
+    ///
+    /// let mask = upch.mask(ChannelState::VoltArb);
+    ///
+    /// assert_eq!(mask.as_slice(), &[0x00000000, 0x00080008]);
+    /// ```
+    pub(crate) fn mask(&self, val: ChannelState) -> ChanMask {
+        let mut mask = ChanMask::none();
+
+        for idx in 0..consts::NCHANS {
+            if self.get(idx) == val {
+                mask.set_enabled(idx, true);
+            }
+        }
+
+        mask
     }
 
     /// Get the serialisable format of this register specified
