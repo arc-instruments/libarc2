@@ -177,10 +177,10 @@ pub trait Instruction {
 /// ## Instruction layout
 ///
 /// ```text
-///        +--------+--------------+-------+-------+------------------+
-///        | OpCode | DACMask::ALL | Empty | Empty | DACVoltage::ZERO |
-///        +--------+--------------+-------+-------+------------------+
-/// Words:     1           1           1       1            4
+///        +--------+--------------+-------+---------------------+------------------+
+///        | OpCode | DACMask::ALL | Empty | DACVoltageMask::ALL | DACVoltage::ZERO |
+///        +--------+--------------+-------+---------------------+------------------+
+/// Words:     1           1           1              1                   4
 /// ```
 pub struct ResetDAC {
     instrs: Vec<u32>
@@ -193,7 +193,7 @@ impl ResetDAC {
         Self::from_registers(&[&OpCode::SetDAC,
                                &DACMask::ALL,
                                &Empty::new(),
-                               &Empty::new(),
+                               &DACVoltageMask::ALL,
                                &DACVoltage::new()])
     }
 }
@@ -1300,14 +1300,14 @@ mod tests {
         let mut instr = ResetDAC::new();
 
         assert_eq!(instr.compile().view(),
-            &[0x1, 0xffff, 0x0, 0x0, 0x80008000, 0x80008000, 0x80008000,
+            &[0x1, 0xffff, 0x0, 0xf, 0x80008000, 0x80008000, 0x80008000,
               0x80008000, 0x80008000]);
 
         assert_eq!(instr.to_bytevec(),
             &[0x01, 0x00, 0x00, 0x00,
               0xFF, 0xFF, 0x00, 0x00,
               0x00, 0x00, 0x00, 0x00,
-              0x00, 0x00, 0x00, 0x00,
+              0x0F, 0x00, 0x00, 0x00,
               0x00, 0x80, 0x00, 0x80,
               0x00, 0x80, 0x00, 0x80,
               0x00, 0x80, 0x00, 0x80,
