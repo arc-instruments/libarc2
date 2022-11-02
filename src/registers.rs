@@ -97,6 +97,13 @@ pub(crate) mod consts {
         DACMask::CH60_63, DACMask::CH60_63, DACMask::CH60_63, DACMask::CH60_63
     ];
 
+    pub(crate) const DACHCLUSTERMAP: [DACMask; 16] = [
+        DACMask::CH00_03, DACMask::CH04_07, DACMask::CH08_11, DACMask::CH12_15,
+        DACMask::CH16_19, DACMask::CH20_23, DACMask::CH24_27, DACMask::CH28_31,
+        DACMask::CH32_35, DACMask::CH36_39, DACMask::CH40_43, DACMask::CH44_47,
+        DACMask::CH48_51, DACMask::CH52_55, DACMask::CH56_59, DACMask::CH60_63,
+    ];
+
     pub(crate) const HSCLUSTERMAP: [ClusterMask; 8] = [
         ClusterMask::CL0,
         ClusterMask::CL1,
@@ -1377,6 +1384,21 @@ impl DACVoltage {
         DACVoltage { values: values.to_vec() }
     }
 
+    // Similar to `from_raw_values` but Optional inputs, Somes will
+    // be unwrapped, Nones will be replaced with zero
+    pub(crate) fn from_raw_values_opt(values: &[Option<u32>]) -> DACVoltage {
+        let mut raw_values = Vec::with_capacity(Self::NUMVOLTAGES);
+        for value in values {
+            let raw = match value {
+                Some(v) => *v,
+                None => DACVZERO
+            };
+            raw_values.push(raw);
+        }
+
+        DACVoltage { values: raw_values }
+    }
+
     /// Set the upper value of a specified channel index
     pub fn set_upper(&mut self, idx: usize, voltage: u16) {
         self.values[idx] = (voltage as u32) << 16 |
@@ -1494,6 +1516,45 @@ bitflags! {
         /// Select all channels
         const ALL  = Self::CH0.bits | Self::CH1.bits |
                      Self::CH2.bits | Self::CH3.bits;
+    }
+}
+
+impl DACVoltageMask {
+
+    const ALL_MASKS: [Self; 4] = [Self::CH0, Self::CH1, Self::CH2, Self::CH3];
+
+    /// Create a new DACVoltageMask from individual indices within a
+    /// DAC half-cluster
+    pub(crate) fn from_indices(indices: &[usize]) -> Self {
+        let mut mask = Self::NONE;
+        for idx in indices {
+
+            if idx >= 4 {
+                break;
+            }
+
+            mask |= Self::ALL_MASKS[*idx]
+        }
+
+        mask
+    }
+
+    /// Create a new DACVoltageMask from individual voltages within
+    /// a DAC half-cluster. This must be 4-items long, None values will
+    /// deselect the associated index
+    pub(crate) fn from_indices_opt<T>(voltages: &[Option<T>]) -> Self {
+        let mut mask = Self::NONE;
+        for (idx, smth) in voltages.iter().enumerate() {
+            if idx >=4 {
+                break;
+            }
+
+            if smth.is_some() {
+                mask |= Self::ALL_MASKS[idx];
+            }
+        }
+
+        mask
     }
 }
 

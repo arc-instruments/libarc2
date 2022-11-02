@@ -1090,28 +1090,71 @@ impl Instrument {
     }
 
     /// Configure channels at specified voltages. Argument `voltages` expects an
-    /// array of tuples following the format `(channel, voltage)`. If `base`
-    /// is not `None` the channels *not* included in `voltages` will be preset
-    /// at the specified voltage, otherwise they will be left at whatever state
-    /// they are currently. For instance to set channels 7, 8 and 9 at 1.0, 1.5 and
-    /// 2.0 V respectively while grounding the rest you would do the following
+    /// array of tuples following the format `(channel, voltage)`.
+    /// If `base` is not `None` the channels *not* included in `voltages` will be
+    /// set at the specified voltage, otherwise they will remain at whatever
+    /// state they were previously configured.
+    /// For instance to set channels 7, 8 and 9 at 1.0, 1.5 and 2.0 V respectively
+    /// you would do the following
     ///
     /// ```no_run
     /// use libarc2::{Instrument};
+    /// # use libarc2::ArC2Error;
+    ///
+    /// # fn main() -> Result<(), ArC2Error> {
     /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
     ///
     /// let input: Vec<(u16, f32)> = vec![(7, 1.0), (8, 1.5), (9, 2.0)];
     /// // Setup channels 7, 8 and 9, set others to 0.0 V
-    /// arc2.config_channels(&input, Some(0.0));
+    /// arc2.config_channels(&input, Some(0.0))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// A common scenario is to float unselected channels while biasing the
+    /// selected ones.
+    ///
+    /// ```no_run
+    /// use libarc2::{Instrument};
+    /// # use libarc2::ArC2Error;
+    ///
+    /// # fn main() -> Result<(), ArC2Error> {
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    /// let all_chans = (0..64).collect::<Vec<usize>>();
+    ///
+    /// let input: Vec<(u16, f32)> = vec![(7, 1.0), (8, 1.5), (9, 2.0)];
+    ///
+    /// arc2.connect_to_gnd(&[])?
+    ///     .open_channels(&all_chans)?
+    ///     .config_channels(&input, None)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// If you want the unselected channels to be set at 400 mV, you
+    /// would do instead
+    ///
+    /// ```no_run
+    /// use libarc2::{Instrument};
+    /// # use libarc2::ArC2Error;
+    ///
+    /// # fn main() -> Result<(), ArC2Error> {
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    /// let all_chans = (0..64).collect::<Vec<usize>>();
+    ///
+    /// let input: Vec<(u16, f32)> = vec![(7, 1.0), (8, 1.5), (9, 2.0)];
+    ///
+    /// arc2.connect_to_gnd(&[])?
+    ///     .open_channels(&all_chans)?
+    ///     .config_channels(&input, Some(0.4))?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn config_channels(&mut self, voltages: &[(u16, f32)], base: Option<f32>)
         -> Result<&mut Self, ArC2Error> {
 
-
-        let (base_voltage, clear) = match base {
-            Some(x) => ((vidx!(x), vidx!(x)), true),
-            None => ((vidx!(0.0), vidx!(0.0)), false)
-        };
+        // If `base` is Some(...) convert it into a suitable pair of u16s
+        let base_voltage = base.and_then(|x| Some((vidx!(x), vidx!(x))));
 
         let mut input: Vec<(u16, u16, u16)> = Vec::with_capacity(voltages.len());
 
@@ -1119,9 +1162,21 @@ impl Instrument {
             input.push((item.0, vidx!(item.1), vidx!(item.1)));
         }
 
-        let instrs = SetDAC::from_channels(&input, base_voltage, clear)?;
 
+        let unselected_state = if base_voltage.is_some() {
+            ChannelState::VoltArb
+        } else {
+            ChannelState::Maintain
+        };
+
+        let (mut upch, instrs) = SetDAC::from_channels(&input, base_voltage,
+                &ChannelState::VoltArb, &unselected_state)?;
+
+        // XXX A TIAState::Open is missing here somewhere
         self._amp_prep()?;
+
+        self.process(upch.compile())?;
+        self._tia_state = TIAState::Open(ChanMask::all());
 
         for mut i in instrs {
             self.process(i.compile())?;
@@ -1163,9 +1218,12 @@ impl Instrument {
         let zero: u16 = vidx!(0.0);
 
         // generate a list of dac settings, only one channel in this case
-        let setdacs = SetDAC::from_channels(&[(low as u16, vread, vread)], (zero, zero), false)?;
+        let (mut upch, setdacs) = SetDAC::from_channels(&[(low as u16, vread, vread)],
+            Some((zero, zero)), &ChannelState::VoltArb, &ChannelState::Open)?;
 
         self._amp_prep()?;
+        self.process(upch.compile())?;
+        self._tia_state = TIAState::Open(ChanMask::all());
         // process them with the appropriate delay
         for mut instr in setdacs {
             self.process(instr.compile())?;
@@ -1646,7 +1704,15 @@ impl Instrument {
 
         }
 
-        let instrs = SetDAC::from_channels(&channels, (vidx!(0.0), vidx!(0.0)), false)?;
+        let (mut upch, instrs) = if high_speed {
+            SetDAC::from_channels(&channels, Some((vidx!(0.0), vidx!(0.0))),
+                &ChannelState::HiSpeed, &ChannelState::Open)?
+        } else {
+            SetDAC::from_channels(&channels, Some((vidx!(0.0), vidx!(0.0))),
+                &ChannelState::VoltArb, &ChannelState::Open)?
+        };
+        self.process(upch.compile())?;
+        self._tia_state = TIAState::Open(ChanMask::all());
         for mut i in instrs {
             self.process(i.compile())?;
         }
@@ -2008,7 +2074,12 @@ impl Instrument {
         self.process(conf.compile())?;
         self._tia_state = TIAState::Open(ChanMask::all());
 
-        let instr_active = SetDAC::from_channels(&input_active, (vidx!(0.0), vidx!(0.0)), false)?;
+        let (mut upch, instr_active) = SetDAC::from_channels(&input_active,
+            Some((vidx!(0.0), vidx!(0.0))), &ChannelState::HiSpeed,
+            &ChannelState::Open)?;
+
+        self.process(upch.compile())?;
+        self._tia_state = TIAState::Open(ChanMask::all());
 
         // SetDAC for the actual pulse
         for mut i in instr_active {

@@ -1,8 +1,10 @@
 //! Commands processable by ArC2
 
-use std::collections::HashMap;
+use std::convert::TryInto;
+use std::collections::BTreeMap;
 use crate::registers::ToU32s;
 use crate::registers::Terminate;
+use crate::registers::consts::DACHCLUSTERMAP;
 use crate::registers::{OpCode, Empty, DACMask, DACVoltage, DACVoltageMask};
 use crate::registers::{ChannelConf, SourceConf, ChannelState};
 use crate::registers::{IOEnable, IOMask, ChanMask, Averaging};
@@ -378,22 +380,31 @@ impl SetDAC {
     }
 
     /// Assemble a minimum set of instructions that correspond to the supplied
-    /// voltages and channels. The argument of this function is a slice of
-    /// tuples that conform to this specification
+    /// voltages and channels. **Legacy version**; only use for diagnostics.
+    /// The first argument of this function is a slice of tuples that conform to
+    /// this specification
     ///
     /// ```text
     /// (channel idx, DAC- voltage, DAC+ voltage)
     /// ```
-    /// Unselected channels will be set to whatever the `base` argument indicates.
-    /// Again the format is (DAC- voltage, DAC+ voltage).
     ///
-    /// If `clear` is set to true an additional instruction will
-    /// be emitted to ensure that all clusters are set to `base` voltage
-    /// _before_ any further SetDAC instructions are emitted.
+    /// Unselected channels will be set to whatever the `base` argument indicates.  and
+    /// floated. Again the format is (DAC- voltage, DAC+ voltage). The last argument,
+    /// `state`, will be the channel configuration for the selected channels. This will
+    /// typically be either [`VoltArb`][`crate::registers::ChannelState::VoltArb`], for
+    /// arbitrary voltage operations, or
+    /// [`HiSpeed`][`crate::registers::ChannelState::HiSpeed`], for high voltage pulsing.
+    ///
+    /// The function will return two values, the first is an [`UpdateChannel`]
+    /// instruction that should be used to properly configure the channels. The
+    /// second is the actual vector of [`SetDAC`] instructions that set the
+    /// voltages of all channels at appropriate levels. Both of them should be
+    /// processed by ArC TWO (unless you know what you're doing).
     ///
     /// ## Example
-    /// ```
+    /// ```no_run
     /// use libarc2::instructions::{SetDAC, Instruction};
+    /// use libarc2::registers::ChannelState;
     ///
     /// let input: Vec<(u16, u16, u16)> = vec![
     ///    ( 0, 0x8ccc, 0x8ccc), ( 1, 0x8ccc, 0x8ccc), ( 2, 0x6000, 0x7000),
@@ -402,81 +413,51 @@ impl SetDAC {
     ///    (22, 0x7000, 0x7000), (17, 0x6000, 0x7000), (63, 0x7000, 0x9000)
     /// ];
     ///
-    /// let mut instructions = SetDAC::from_channels(&input, (0x8000, 0x8000), false).unwrap();
-    ///
-    /// assert_eq!(instructions.len(), 4);
-    /// assert_eq!(instructions[0].compile().view(),
-    ///     &[0x00000001, 0x0000000b, 0x00000000, 0x00000000, 0x8ccc8ccc,
-    ///       0x8ccc8ccc, 0x70006000, 0x80008000, 0x80008000]);
-    /// assert_eq!(instructions[1].compile().view(),
-    ///     &[0x00000001, 0x00000010, 0x00000000, 0x00000000, 0x80008000,
-    ///       0x70006000, 0x80008000, 0x80008000, 0x80008000]);
-    /// assert_eq!(instructions[2].compile().view(),
-    ///     &[0x00000001, 0x00000020, 0x00000000, 0x00000000, 0x80008000,
-    ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
-    /// assert_eq!(instructions[3].compile().view(),
-    ///     &[0x00000001, 0x00008000, 0x00000000, 0x00000000, 0x80008000,
-    ///       0x80008000, 0x80008000, 0x90007000, 0x80008000]);
-    ///
-    /// // If `clear` is set an additional instruction will be
-    /// // emitted first to set all channels to the specified voltage.
-    /// // In this case all inactive channels are at 0.0 V.
-    /// let mut instructions = SetDAC::from_channels(&input, (0x8000, 0x8000), true).unwrap();
+    /// let (_, mut instructions) = SetDAC::from_channels_old(&input, (0x8000, 0x8000),
+    ///     &ChannelState::VoltArb).unwrap();
     ///
     /// assert_eq!(instructions.len(), 5);
+    /// // This sets all values at base voltage
     /// assert_eq!(instructions[0].compile().view(),
-    ///     &[0x00000001, 0x0000ffff, 0x00000000, 0x00000000, 0x80008000,
+    ///     &[0x00000001, 0x0000ffff, 0x00000000, 0x0000000f, 0x80008000,
     ///       0x80008000, 0x80008000, 0x80008000, 0x80008000]);
+    /// // The next four instructions are calculated so the channels in `input`
+    /// // are set to their specified voltages
     /// assert_eq!(instructions[1].compile().view(),
-    ///     &[0x00000001, 0x0000000b, 0x00000000, 0x00000000, 0x8ccc8ccc,
+    ///     &[0x00000001, 0x0000000b, 0x00000000, 0x0000000f, 0x8ccc8ccc,
     ///       0x8ccc8ccc, 0x70006000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[2].compile().view(),
-    ///     &[0x00000001, 0x00000010, 0x00000000, 0x00000000, 0x80008000,
+    ///     &[0x00000001, 0x00000010, 0x00000000, 0x0000000f, 0x80008000,
     ///       0x70006000, 0x80008000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[3].compile().view(),
-    ///     &[0x00000001, 0x00000020, 0x00000000, 0x00000000, 0x80008000,
+    ///     &[0x00000001, 0x00000020, 0x00000000, 0x0000000f, 0x80008000,
     ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[4].compile().view(),
-    ///     &[0x00000001, 0x00008000, 0x00000000, 0x00000000, 0x80008000,
+    ///     &[0x00000001, 0x00008000, 0x00000000, 0x0000000f, 0x80008000,
     ///       0x80008000, 0x80008000, 0x90007000, 0x80008000]);
-    ///
     /// ```
-    pub fn from_channels(input: &[(u16, u16, u16)], base: (u16, u16), clear: bool)
-        -> Result<Vec<Self>, InstructionError> {
+    #[deprecated(note="This will get removed once stability of the new `from_channels` is ensured")]
+    pub fn from_channels_old(input: &[(u16, u16, u16)], base: (u16, u16), state: &ChannelState)
+        -> Result<(UpdateChannel, Vec<Self>), InstructionError> {
 
-        let mut result: Vec<SetDAC> = Vec::new();
+        let mut result: Vec<Self> = Vec::new();
 
-        // This is the base voltage. If clear == True this will be used to reset
-        // all ArC TWO channels at this base voltage before proceeding. It will
-        // also be used to compare instructions against a know state so that we
-        // do not duplicate them. If clear == False this value will still be
-        // used as a filler value for the unselected channels but it will have
-        // no effect otherwise.
         let (low, high) = (base.0, base.1);
 
-        // This will complain if low > high+1
-        if clear {
-            result.push(SetDAC::new_all_at_bias(low, high)?);
-        }
 
         let mut channels: [(u16, u16); 64] = [(low, high); 64];
-        let mut bucket: HashMap<[u32; 4], Vec<u16>> = HashMap::new();
+        let mut floats = ChannelConf::new_with_state(ChannelState::Open);
+        let mut bucket: BTreeMap<[u32; 4], Vec<u16>> = BTreeMap::new();
         let mut keys: Vec<[u32; 4]> = Vec::with_capacity(64);
 
         for (idx, clow, chigh) in input {
             channels[*idx as usize] = (*clow, *chigh);
+            floats.set(*idx as usize, *state);
         }
 
 
         for (idx, chunk) in channels.chunks(4usize).enumerate() {
 
-            // if we are using a base voltage (clear == True) check if whole
-            // half-clusters are already at base voltage, no reason to emit a LD
-            // VOLT instruction if they are already at proper state. If base
-            // voltage is not used (clear == False) then there's no point to run
-            // this check as the channels might be at an indeterminate state so
-            // comparing them against a base voltage is pointless
-            if clear {
                 let unchanged: bool = {
                     let mut res = true;
                     for (clow, chigh) in chunk {
@@ -489,7 +470,6 @@ impl SetDAC {
                 };
 
                 if unchanged { continue; }
-            }
 
             let key = {
                 let mut res: [u32; 4] = [0x80008000; 4];
@@ -510,19 +490,146 @@ impl SetDAC {
 
         }
 
+        result.push(SetDAC::new_all_at_bias(low, high)?);
         for key in keys {
             let bits: u32 = (*bucket.get(&key).unwrap()).iter().sum::<u16>() as u32;
             let mask = DACMask::from_bits(bits).unwrap();
             let voltages = DACVoltage::from_raw_values(&key);
 
-            // TODO: Update this to have more optimal voltage mask allocation
             result.push(SetDAC::with_regs(&mask, &voltages, &DACVoltageMask::ALL)?);
         }
 
 
-        Ok(result)
+        Ok((UpdateChannel::from_regs_default_source(&floats), result))
     }
 
+    /// Assemble a minimum set of instructions that correspond to the supplied
+    /// voltages and channels. The first argument of this function is a slice of
+    /// tuples that conform to this specification
+    ///
+    /// ```text
+    /// (channel idx, DAC- voltage, DAC+ voltage)
+    /// ```
+    ///
+    /// Unselected channels will be set to whatever the `base` argument indicates and
+    /// set to a state specified by `unselected_state`. The format for `base` is
+    /// is the same eg. (DAC- voltage, DAC+ voltage). Argument `selected_state`,
+    /// will be the channel configuration for the selected channels. This will
+    /// typically be either [`VoltArb`][`crate::registers::ChannelState::VoltArb`], for
+    /// arbitrary voltage operations, or
+    /// [`HiSpeed`][`crate::registers::ChannelState::HiSpeed`], for high voltage pulsing.
+    /// State of the unselected channels can be provided by `unselected_state`. This
+    /// will typically be [`VoltArb`][`crate::registers::ChannelState::VoltArb`] or
+    /// [`HiSpeed`][`crate::registers::ChannelState::HiSpeed`] if channels should be
+    /// biased or [`Maintain`][`crate::registers::ChannelState::Maintain`] if the
+    /// previous configuration should be kept instead. Although you can set the
+    /// unselected channels to [`Open`][`crate::registers::ChannelState::Open`]
+    /// this does not guarantee that the channels will in fact be floated as
+    /// they might be tied to a hard ground by a previous command.
+    ///
+    /// The function will return two values, the first is an [`UpdateChannel`]
+    /// instruction that should be used to properly configure the channels. The
+    /// second is the actual vector of [`SetDAC`] instructions that set the
+    /// voltages of all channels at appropriate levels. Both of them should be
+    /// processed by ArC TWO (unless you know what you're doing).
+    ///
+    /// ## Example
+    /// ```
+    /// use libarc2::instructions::{SetDAC, Instruction};
+    /// use libarc2::registers::ChannelState;
+    ///
+    /// let input: Vec<(u16, u16, u16)> = vec![
+    ///    ( 0, 0x8ccc, 0x8ccc), ( 1, 0x8ccc, 0x8ccc), ( 2, 0x6000, 0x7000),
+    ///    ( 4, 0x8ccc, 0x8ccc), ( 5, 0x8ccc, 0x8ccc), ( 6, 0x6000, 0x7000),
+    ///    (12, 0x8ccc, 0x8ccc), (13, 0x8ccc, 0x8ccc), (14, 0x6000, 0x7000),
+    ///    (22, 0x7000, 0x7000), (17, 0x6000, 0x7000), (63, 0x7000, 0x9000)
+    /// ];
+    ///
+    /// let (_, mut instructions) = SetDAC::from_channels(&input, Some((0x8000, 0x8000)),
+    ///     &ChannelState::VoltArb, &ChannelState::VoltArb).unwrap();
+    ///
+    /// assert_eq!(instructions.len(), 5);
+    /// // This sets all values at base voltage
+    /// assert_eq!(instructions[0].compile().view(),
+    ///     &[0x00000001, 0x0000ffff, 0x00000000, 0x0000000f, 0x80008000,
+    ///       0x80008000, 0x80008000, 0x80008000, 0x80008000]);
+    /// // The next four instructions are calculated so the channels in `input`
+    /// // are set to their specified voltages
+    /// assert_eq!(instructions[1].compile().view(),
+    ///     &[0x00000001, 0x00008000, 0x00000000, 0x00000008, 0x80008000,
+    ///       0x80008000, 0x80008000, 0x90007000, 0x80008000]);
+    /// assert_eq!(instructions[2].compile().view(),
+    ///     &[0x00000001, 0x00000020, 0x00000000, 0x00000004, 0x80008000,
+    ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
+    /// assert_eq!(instructions[3].compile().view(),
+    ///     &[0x00000001, 0x00000010, 0x00000000, 0x00000002, 0x80008000,
+    ///       0x70006000, 0x80008000, 0x80008000, 0x80008000]);
+    /// assert_eq!(instructions[4].compile().view(),
+    ///     &[0x00000001, 0x0000000b, 0x00000000, 0x00000007, 0x8ccc8ccc,
+    ///       0x8ccc8ccc, 0x70006000, 0x80008000, 0x80008000]);
+    /// ```
+    pub fn from_channels(input: &[(u16, u16, u16)], base: Option<(u16, u16)>,
+        selected_state: &ChannelState, unselected_state: &ChannelState) ->
+        Result<(UpdateChannel, Vec<Self>), InstructionError> {
+
+        let mut result: Vec<Self> = Vec::new();
+        let mut chanconf = ChannelConf::new_with_state(*unselected_state);
+        let mut bucket: BTreeMap<[Option<u32>; 4], DACMask> = BTreeMap::new();
+        let mut dacs: [Option<u32>; 64] = [None; 64];
+
+        // Preinitialise all channels at the specified voltage
+        match base {
+            Some((vlow, vhigh)) => {
+                result.push(SetDAC::new_all_at_bias(vlow, vhigh)?);
+            },
+            _ => {}
+        }
+
+        // Assign active channel states and voltages
+        for (ch, clow, chigh) in input {
+            let idx = *ch as usize;
+            chanconf.set(idx, *selected_state);
+            dacs[idx] = Some(dacvoltage!(*clow, *chigh));
+        }
+
+        // Split them into groups of 4
+        for (cidx, chunk) in dacs.chunks(4).enumerate() {
+            // This shouldn't happen but skip half-clusters
+            // > 15
+            if cidx >= 16usize {
+                break;
+            }
+
+            // Ignore clusters that are completely empty
+            if chunk.iter().all(|item| item.is_none()) {
+                continue;
+            }
+
+            // We know this is the correct length because we
+            // are moving in steps of 4 elements at a time
+            let key: [Option<u32>; 4] = chunk.try_into().unwrap();
+
+            if bucket.contains_key(&key) {
+                let entry = bucket.get_mut(&key).unwrap();
+                *entry |= DACHCLUSTERMAP[cidx];
+            } else {
+                bucket.insert(key, DACHCLUSTERMAP[cidx]);
+            }
+
+        }
+
+        // Construct the SetDACs
+        for (voltage, dacmask) in &bucket {
+            let voltages = DACVoltage::from_raw_values_opt(voltage);
+
+            // Find the non-none indices
+            let dacvoltagemask = DACVoltageMask::from_indices_opt(voltage);
+            result.push(SetDAC::with_regs(&dacmask, &voltages, &dacvoltagemask)?);
+
+        }
+
+        Ok((UpdateChannel::from_regs_default_source(&chanconf), result))
+    }
 
     /// Set values for the auxiliarry DACs
     pub(crate) fn from_channels_aux(input: &[(AuxDACFn, f32)])
