@@ -180,7 +180,7 @@ impl std::convert::From<std::sync::mpsc::SendError<Option<Chunk>>> for ArC2Error
 #[derive(Clone, Debug)]
 enum TIAState {
     Closed,
-    Open
+    Open(ChanMask)
 }
 
 
@@ -510,7 +510,7 @@ impl Instrument {
                 _sender: sender,
                 _receiver: Arc::new(Mutex::new(receiver)),
                 _op_running: Arc::new(atomic::AtomicBool::new(false)),
-                _tia_state: TIAState::Open,
+                _tia_state: TIAState::Open(ChanMask::all()),
 
             }),
             Err(err) => Err(ArC2Error::FPGAError(err))
@@ -795,7 +795,8 @@ impl Instrument {
     pub fn float_all(&mut self) -> Result<&mut Self, ArC2Error> {
         self.connect_to_gnd(&[])?;
         self.process(&*CHAN_FLOAT_ALL)?;
-        self._tia_state = TIAState::Open;
+        self._tia_state = TIAState::Open(ChanMask::all());
+
         Ok(self)
     }
 
@@ -849,7 +850,7 @@ impl Instrument {
     /// Prepare the DACs for transition to VoltArb or CurrentRead
     fn _amp_prep(&mut self) -> Result<&mut Self, ArC2Error> {
         match self._tia_state {
-            TIAState::Open => {
+            TIAState::Open(_) => {
                 self._tia_state = TIAState::Closed;
                 // set DACs to 0V and connect to GND
                 self.ground_all_fast()?;
@@ -1721,7 +1722,7 @@ impl Instrument {
 
         // set channels as HS
         self.process(conf.compile())?;
-        self._tia_state = TIAState::Open;
+        self._tia_state = TIAState::Open(ChanMask::all());
         // setup a high-speed differential pulsing scheme
         self._setup_dacs_2t_pulsing(&[(low, high, voltage)], true, true)?;
         self.add_delay(30_000u128)?;
@@ -1855,7 +1856,7 @@ impl Instrument {
         self.process(pulse)?;
 
         self.process(conf.compile())?;
-        self._tia_state = TIAState::Open;
+        self._tia_state = TIAState::Open(ChanMask::all());
         // setup a high speed differential pulsing scheme
         // WARNING! If a non-differential pulse (last argument is `false`)
         // is used instead `timings` for high channels above should be
@@ -2005,7 +2006,7 @@ impl Instrument {
 
         // set pulse channel configuration for the actual pulse
         self.process(conf.compile())?;
-        self._tia_state = TIAState::Open;
+        self._tia_state = TIAState::Open(ChanMask::all());
 
         let instr_active = SetDAC::from_channels(&input_active, (vidx!(0.0), vidx!(0.0)), false)?;
 
