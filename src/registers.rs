@@ -1506,13 +1506,13 @@ bitflags! {
         /// Select no channels
         const NONE = 0b00000000000000000000000000000000;
         /// Channel 0
-        const CH0  = 0b00000000000000000000000000000001;
+        const CH0  = 0b00000000000000000000000000001000;
         /// Channel 1
-        const CH1  = 0b00000000000000000000000000000010;
+        const CH1  = 0b00000000000000000000000000000100;
+        /// Channel 2
+        const CH2  = 0b00000000000000000000000000000010;
         /// Channel 3
-        const CH2  = 0b00000000000000000000000000000100;
-        /// Channel 4
-        const CH3  = 0b00000000000000000000000000001000;
+        const CH3  = 0b00000000000000000000000000000001;
         /// Select all channels
         const ALL  = Self::CH0.bits | Self::CH1.bits |
                      Self::CH2.bits | Self::CH3.bits;
@@ -1529,7 +1529,7 @@ impl DACVoltageMask {
         let mut mask = Self::NONE;
         for idx in indices {
 
-            if idx >= 4 {
+            if *idx >= 4 {
                 break;
             }
 
