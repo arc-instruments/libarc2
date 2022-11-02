@@ -1048,6 +1048,46 @@ impl Instrument {
         Ok(result)
     }
 
+
+    /// Set the specified channels as Open effectively disconnecting them from the DACs.
+    /// Typically this is done when chaining into a new channel configuration. For instance
+    /// a common biasing scenario is to bias specific channels at a specific voltage
+    /// then float some (or all) of the unselected channels. This would translate into the
+    /// following code
+    ///
+    /// ```no_run
+    /// use libarc2::{Instrument};
+    /// # use libarc2::ArC2Error;
+    ///
+    /// # fn main() -> Result<(), ArC2Error> {
+    ///
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    ///
+    /// // This will float all channels then bias only the selected ones, in this case
+    /// // channels 7 and 19 at 2.0 and 1.5 volts respectively
+    ///
+    /// arc2.connect_to_gnd(&[])? // clear all grounds
+    ///     .open_channels(&(0..64).collect::<Vec<usize>>())? // set all channels to open;
+    ///                                                       // effectively floating them
+    ///     .config_channels(&[(7, 2.0), (19, 1.5)], None)?;  // bias selected channels
+    /// # Ok(())
+    /// # }
+    ///
+    /// ```
+    pub fn open_channels(&mut self, input: &[usize]) -> Result<&mut Self, ArC2Error> {
+
+        let mut chanconf = ChannelConf::new();
+
+        for ch in input {
+            chanconf.set(*ch, ChannelState::Open);
+        }
+
+        let mut upch = UpdateChannel::from_regs_default_source(&chanconf);
+        self.process(upch.compile())?;
+
+        Ok(self)
+    }
+
     /// Configure channels at specified voltages. Argument `voltages` expects an
     /// array of tuples following the format `(channel, voltage)`. If `base`
     /// is not `None` the channels *not* included in `voltages` will be preset
