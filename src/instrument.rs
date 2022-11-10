@@ -67,15 +67,6 @@ lazy_static! {
         instr
     };
 
-    static ref PREP_AMP_ALL: AmpPrep = {
-        let mut mask = ChanMask::new();
-        mask.set_enabled_all(true);
-        let mut instr = AmpPrep::new(&mask);
-
-        instr.compile();
-        instr
-    };
-
     static ref ZERO_HS_TIMINGS: HSConfig = {
         let mut instr = HSConfig::new([0u32; 8]);
         instr.compile();
@@ -173,14 +164,6 @@ impl std::convert::From<std::sync::mpsc::SendError<Option<Chunk>>> for ArC2Error
             None => ArC2Error::OutputBufferError(-1)
         }
     }
-}
-
-
-/// Current status of the TIA feedback loop
-#[derive(Clone, Debug)]
-enum TIAState {
-    Closed,
-    Open(ChanMask)
 }
 
 
@@ -354,7 +337,7 @@ pub struct Instrument {
     // A thread has been spawned
     _op_running: Arc<atomic::AtomicBool>,
 
-    _tia_state: TIAState,
+    _tia_state: ChanMask
 }
 
 /// Find available device IDs.
@@ -510,7 +493,7 @@ impl Instrument {
                 _sender: sender,
                 _receiver: Arc::new(Mutex::new(receiver)),
                 _op_running: Arc::new(atomic::AtomicBool::new(false)),
-                _tia_state: TIAState::Open(ChanMask::all()),
+                _tia_state: ChanMask::all(),
 
             }),
             Err(err) => Err(ArC2Error::FPGAError(err))
@@ -534,7 +517,7 @@ impl Instrument {
     pub fn open_with_fw(id: i32, path: &str, retained_mode: bool) -> Result<Instrument, ArC2Error> {
         let mut instr = Instrument::open(id, retained_mode)?;
         instr.load_firmware(&path)?;
-        instr._amp_prep()?;
+        instr._amp_prep(None)?;
         instr.process(&*RESET_DAC)?;
         instr.process(&*SET_3V3_LOGIC)?;
         instr.process(&*UPDATE_DAC)?;
@@ -795,7 +778,7 @@ impl Instrument {
     pub fn float_all(&mut self) -> Result<&mut Self, ArC2Error> {
         self.connect_to_gnd(&[])?;
         self.process(&*CHAN_FLOAT_ALL)?;
-        self._tia_state = TIAState::Open(ChanMask::all());
+        self._tia_state = ChanMask::all();
 
         Ok(self)
     }
@@ -805,8 +788,30 @@ impl Instrument {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(30_000u128)?;
-        self._amp_prep()?;
+        self._amp_prep(None)?;
         self.process(&*CHAN_ARB_ALL)?;
+
+        Ok(self)
+    }
+
+    /// Ground specified channels reverting them to VoltArb
+    pub fn ground_slice(&mut self, chans: &[usize]) -> Result<&mut Self, ArC2Error> {
+
+        let input: Vec<(u16, u16, u16)> = chans.iter()
+                                               .map(|c| (*c as u16, vidx!(0.0), vidx!(0.0)))
+                                               .collect();
+
+        let (mut upch, setdacs) = SetDAC::from_channels(&input, None,
+            &ChannelState::VoltArb, &ChannelState::Maintain)?;
+
+        for mut s in setdacs {
+            self.process(s.compile())?;
+        }
+
+        self.add_delay(30_000u128)?;
+        self._amp_prep(Some(chans))?;
+        // MOD CH should come after amp prep
+        self.process(upch.compile())?;
 
         Ok(self)
     }
@@ -848,27 +853,61 @@ impl Instrument {
     }
 
     /// Prepare the DACs for transition to VoltArb or CurrentRead
-    fn _amp_prep(&mut self) -> Result<&mut Self, ArC2Error> {
-        match self._tia_state {
-            TIAState::Open(_) => {
-                self._tia_state = TIAState::Closed;
-                // set DACs to 0V and connect to GND
-                self.ground_all_fast()?;
-                self.connect_to_gnd(&ALL_CHANS)?;
-                self.process(&*PREP_AMP_ALL)?;
-                self.add_delay(100_000u128)?;
-                // and disconnect GND before moving on
-                self.connect_to_gnd(&[])
-            },
-            TIAState::Closed => {
-                Ok(self)
-            }
-        }
+    fn _amp_prep(&mut self, chans: Option<&[usize]>) -> Result<&mut Self, ArC2Error> {
+
+            let common = &self._tia_state & &(if chans.is_some() {
+                ChanMask::from_channels(chans.unwrap())
+            } else { ChanMask::all() });
+
+            // Only prepare channels that are common in chans
+            // and self._tia_state
+            let mut amp_prep = AmpPrep::new(&common);
+
+            // this sets the channels in common as 0
+            // essentially this means
+            // self._tia_state = self._tia_state ^ common
+            // was -> self._tia_state = TIAState::Closed;
+            self._tia_state = &self._tia_state ^ &common;
+            // set DACs for common channels to 0V and connect to GND
+            // was -> self.ground_all_fast()?;
+            self.ground_slice_fast(&common.channels())?;
+            // was -> self.connect_to_gnd(&ALL_CHANS)?;
+            self.connect_to_gnd(&common.channels())?;
+
+            // AMP PRP
+            self.process(amp_prep.compile())?;
+            self.add_delay(100_000u128)?;
+            // and disconnect GND before moving on
+            self.connect_to_gnd(&[])
+
     }
 
     /// Set all DACs to ground maintaining current channel state
     pub fn ground_all_fast(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(30_000u128)?;
+
+        Ok(self)
+    }
+
+    /// Ground specified channels maintaining current channel state
+    pub fn ground_slice_fast(&mut self, chans: &[usize]) -> Result<&mut Self, ArC2Error> {
+
+        let input: Vec<(u16, u16, u16)> = chans.iter()
+                                               .map(|c| (*c as u16, vidx!(0.0), vidx!(0.0)))
+                                               .collect();
+        // we don't care about the update channel instructions,
+        // just setting the DACs to proper voltages, the `Maintain`s here
+        // are not really needed either as they are only associated with
+        // the UP CH instruction we are ignoring
+        let (_, setdacs) = SetDAC::from_channels(&input, None,
+            &ChannelState::Maintain, &ChannelState::Maintain)?;
+
+        for mut s in setdacs {
+            self.process(s.compile())?;
+        }
+
         self.process(&*UPDATE_DAC)?;
         self.add_delay(30_000u128)?;
 
@@ -1159,7 +1198,9 @@ impl Instrument {
         let mut input: Vec<(u16, u16, u16)> = Vec::with_capacity(voltages.len());
 
         for item in voltages {
+            // item.0 is the channel number
             input.push((item.0, vidx!(item.1), vidx!(item.1)));
+            self._tia_state.set_enabled(item.0 as usize, true);
         }
 
 
@@ -1172,11 +1213,12 @@ impl Instrument {
         let (mut upch, instrs) = SetDAC::from_channels(&input, base_voltage,
                 &ChannelState::VoltArb, &unselected_state)?;
 
-        // XXX A TIAState::Open is missing here somewhere
-        self._amp_prep()?;
+        // AMP PRP the channels involved; was -> self._amp_prep(None)
+        self._amp_prep(Some(&input.iter().map(|c| (c.0 as usize)).collect::<Vec<_>>()))?;
 
         self.process(upch.compile())?;
-        self._tia_state = TIAState::Open(ChanMask::all());
+        // this has now moved into the first loop see up
+        //self._tia_state = TIAState::Open(ChanMask::all());
 
         for mut i in instrs {
             self.process(i.compile())?;
@@ -1221,9 +1263,17 @@ impl Instrument {
         let (mut upch, setdacs) = SetDAC::from_channels(&[(low as u16, vread, vread)],
             Some((zero, zero)), &ChannelState::VoltArb, &ChannelState::Open)?;
 
-        self._amp_prep()?;
+        // Is this necessary here?
+        // Yes it is necessary, as the UP CH following this will transition
+        // channels to VoltArb so they (both low and high channels) *must be*
+        // AMP PRPed to allow for the transition to happen without transients.
+        let mut chans_to_prep = highs.to_vec();
+        chans_to_prep.push(low);
+        self._amp_prep(Some(&chans_to_prep))?;
         self.process(upch.compile())?;
-        self._tia_state = TIAState::Open(ChanMask::all());
+        // was -> self._tia_state = TIAState::Open(ChanMask::all());
+        self._tia_state.set_enabled(low, true);
+        self._tia_state.set_channels_enabled(highs, true);
         // process them with the appropriate delay
         for mut instr in setdacs {
             self.process(instr.compile())?;
@@ -1266,7 +1316,7 @@ impl Instrument {
     /// after the measurement has gone through.
     pub fn read_slice_open(&mut self, highs: &[usize], ground: bool) -> Result<Vec<f32>, ArC2Error> {
 
-        self._amp_prep()?;
+        self._amp_prep(Some(&highs))?;
 
         let mut channelconf = UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
         self.process(channelconf.compile())?;
@@ -1291,7 +1341,7 @@ impl Instrument {
         self.add_delay(1_000u128)?;
 
         if ground {
-            self.ground_all_fast()?.execute()?;
+            self.ground_slice_fast(&highs)?.execute()?;
         } else {
             self.execute()?;
         }
@@ -1675,6 +1725,10 @@ impl Instrument {
             let (low_ch, high_ch, voltage) = (conf.0, conf.1, conf.2);
 
             if high_speed {
+
+                // HiSpeed Channels should be marked as TIA::Open
+                self._tia_state.set_channels_enabled(&[low_ch as usize, high_ch as usize], true);
+
                 if voltage > 0.0 {
                     if differential {
                         channels.push((high_ch as u16, vidx!(0.0), vidx!(voltage/2.0)));
@@ -1712,7 +1766,11 @@ impl Instrument {
                 &ChannelState::VoltArb, &ChannelState::Open)?
         };
         self.process(upch.compile())?;
-        self._tia_state = TIAState::Open(ChanMask::all());
+
+        // was -> self._tia_state = TIAState::Open(ChanMask::all());
+        // this has now been replaced with selective channel opening during
+        // the main iteration; see above!
+
         for mut i in instrs {
             self.process(i.compile())?;
         }
@@ -1731,6 +1789,7 @@ impl Instrument {
         bias_conf.set(high, ChannelState::VoltArb);
         bias_conf.set(low, ChannelState::VoltArb);
 
+        self._amp_prep(Some(&[low, high]))?;
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
         self.process(conf.compile())?;
 
@@ -1788,7 +1847,8 @@ impl Instrument {
 
         // set channels as HS
         self.process(conf.compile())?;
-        self._tia_state = TIAState::Open(ChanMask::all());
+        // was -> self._tia_state = TIAState::Open(ChanMask::all());
+        self._tia_state.set_channels_enabled(&[low, high], true);
         // setup a high-speed differential pulsing scheme
         self._setup_dacs_2t_pulsing(&[(low, high, voltage)], true, true)?;
         self.add_delay(30_000u128)?;
@@ -1819,19 +1879,23 @@ impl Instrument {
         };
 
         let mut channel_pairs: Vec<(usize, usize, f32)> = Vec::with_capacity(32);
+        let mut chans_to_prep: Vec<usize> = Vec::with_capacity(33); // all highs + the low
 
         // Set all the channels involved in this operation to VoltArb
         // first the low
         bias_conf.set(chan, ChannelState::VoltArb);
+        // channels to AMP PRP
+        chans_to_prep.push(chan);
         for c in bias_channels {
             // and all the highs
             bias_conf.set(*c, ChannelState::VoltArb);
             // and also add the pair to the channel_pairs vec above
             channel_pairs.push((chan, *c, voltage));
+            chans_to_prep.push(*c);
         }
 
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
-        self._amp_prep()?;
+        self._amp_prep(Some(&chans_to_prep))?;
         self.process(conf.compile())?;
 
         // setup a non-high speed differential pulsing scheme
@@ -1922,7 +1986,7 @@ impl Instrument {
         self.process(pulse)?;
 
         self.process(conf.compile())?;
-        self._tia_state = TIAState::Open(ChanMask::all());
+        // this is redundant -> self._tia_state = TIAState::Open(ChanMask::all());
         // setup a high speed differential pulsing scheme
         // WARNING! If a non-differential pulse (last argument is `false`)
         // is used instead `timings` for high channels above should be
@@ -1976,6 +2040,9 @@ impl Instrument {
         // collects the channel voltages as a list of arguments for the
         // SetDAC::from_channels function.
         for (chan, active_v, normal_v) in chans {
+
+            self._tia_state.set_enabled(*chan, true);
+
             // ensure that a timing has been provided in the corresponding cluster
             // index in `cl_nanos`. Reminder: cluster index is always floor(chan/8).
             // For instance if `chans` contains (7, 2.0, 0.0) a channel in cluster 0
@@ -2072,14 +2139,15 @@ impl Instrument {
 
         // set pulse channel configuration for the actual pulse
         self.process(conf.compile())?;
-        self._tia_state = TIAState::Open(ChanMask::all());
+        // this was probably redundant -> self._tia_state = TIAState::Open(ChanMask::all());
 
         let (mut upch, instr_active) = SetDAC::from_channels(&input_active,
             Some((vidx!(0.0), vidx!(0.0))), &ChannelState::HiSpeed,
             &ChannelState::Open)?;
 
         self.process(upch.compile())?;
-        self._tia_state = TIAState::Open(ChanMask::all());
+        // this is now done in the main processing loop; see above
+        // self._tia_state = TIAState::Open(ChanMask::all());
 
         // SetDAC for the actual pulse
         for mut i in instr_active {
@@ -2352,11 +2420,11 @@ impl Instrument {
 
             let chunk = match read_at {
                 ReadAt::Bias => {
-                    slf._amp_prep()?
+                    slf._amp_prep(Some(&[low, high]))?
                        ._read_slice_inner(low, &[high], vidx!(-bias_voltage))?
                 },
                 ReadAt::Arb(arbv) => {
-                    slf._amp_prep()?
+                    slf._amp_prep(Some(&[low, high]))?
                        ._read_slice_inner(low, &[high], vidx!(-arbv))?
                 },
                 // if ReadAt or ReadAfter is never no reads will ever be performed
