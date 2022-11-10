@@ -12,6 +12,8 @@ use bitvec::prelude::*;
 use bitflags::bitflags;
 use num_traits::{FromPrimitive};
 use thiserror::Error;
+use std::ops::{BitAnd, BitXor};
+use std::iter::zip;
 
 mod wordreg {
 
@@ -22,49 +24,49 @@ mod wordreg {
     }
 
     /// One word
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Wx1;
     impl WordSize for Wx1 {
         const WORDS: usize = 1;
     }
 
     /// Two words
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Wx2;
     impl WordSize for Wx2 {
         const WORDS: usize = 2;
     }
 
     /// Three words
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Wx3;
     impl WordSize for Wx3 {
         const WORDS: usize = 3;
     }
 
     /// Four words
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Wx4;
     impl WordSize for Wx4 {
         const WORDS: usize = 4;
     }
 
     /// Five words
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Wx5;
     impl WordSize for Wx5 {
         const WORDS: usize = 5;
     }
 
     /// Six words
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Wx6;
     impl WordSize for Wx6 {
         const WORDS: usize = 6;
     }
 
     /// Seven words
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq)]
     pub struct Wx7;
     impl WordSize for Wx7 {
         const WORDS: usize = 7;
@@ -1572,7 +1574,7 @@ impl ToU32s for DACVoltageMask {
 
 
 /// A generic bitmask of the specified word size
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct U32Mask<T> {
     _words: T,
     bits: BitVec<u32, Msb0>,
@@ -1626,6 +1628,13 @@ impl<T: wordreg::WordSize> U32Mask<T> {
 // Used to create the `from_vals` and `from_indices` function of U32Mask<T>
 macro_rules! make_from_values_impl {
     ($ws:ty, $wx:expr) => {
+
+        /// Create a new [`U32Mask`] from an existing bitvec
+        #[allow(dead_code)]
+        pub(crate) fn from_bitvec(vec: BitVec<u32, Msb0>) -> U32Mask<$ws> {
+            U32Mask { _words: $wx, bits: vec }
+        }
+
         /// Create a new [`U32Mask`] from a series of `u32s`.
         pub fn from_vals(vals: &[u32]) -> U32Mask<$ws> {
             let mut vec: BitVec<u32, Msb0> = BitVec::repeat(false, <$ws>::WORDS*32);
@@ -1749,6 +1758,82 @@ impl ChanMask {
         mask.set_enabled_all(true);
 
         mask
+    }
+
+    /// Create a new ChanMask with all channels in `chans` selected
+    pub fn from_channels(chans: &[usize]) -> Self {
+        let mut mask = Self::new();
+        for c in chans {
+            mask.set_enabled(*c, true);
+        }
+
+        mask
+    }
+
+    /// Set all the channels from `chans` to the specified state. This
+    /// will add to the existing channels
+    pub fn set_channels_enabled(&mut self, chans: &[usize], enabled: bool) {
+        for c in chans {
+            self.set_enabled(*c, enabled);
+        }
+    }
+
+    /// Get a list of the enabled channels for this mask
+    pub fn channels(&self) -> Vec<usize> {
+
+        let mut res: Vec<usize> = Vec::with_capacity(consts::NCHANS);
+
+        for ch in 0..consts::NCHANS {
+            if self.get_enabled(ch) {
+                res.push(ch);
+            }
+        }
+
+        res
+
+    }
+
+    /// Check if no channels are selected in this ChanMask
+    pub fn is_empty(&self) -> bool {
+        *self == ChanMask::new()
+    }
+
+}
+
+impl BitAnd for &ChanMask {
+
+    type Output = ChanMask;
+
+    fn bitand(self, other: Self) -> Self::Output {
+        let mut output = ChanMask::new();
+
+        let slice = self.bits.as_bitslice();
+        let other = other.bits.as_bitslice();
+
+        for (i, (t, o)) in zip(slice, other).enumerate() {
+            output.set_enabled(i, *t & *o);
+        }
+
+        output
+
+    }
+
+}
+
+impl BitXor for &ChanMask {
+
+    type Output = ChanMask;
+
+    fn bitxor(self, other: Self) -> Self::Output {
+        let mut output = ChanMask::new();
+
+        let slice = self.bits.as_bitslice();
+        let other = other.bits.as_bitslice();
+
+        for (i, (t, o)) in zip(slice, other).enumerate() {
+            output.set_enabled(i, *t ^ *o);
+        }
+        output
     }
 
 }
