@@ -556,16 +556,16 @@ impl SetDAC {
     /// // The next four instructions are calculated so the channels in `input`
     /// // are set to their specified voltages
     /// assert_eq!(instructions[1].compile().view(),
-    ///     &[0x00000001, 0x00008000, 0x00000000, 0x00000008, 0x80008000,
+    ///     &[0x00000001, 0x00008000, 0x00000000, 0x00000001, 0x80008000,
     ///       0x80008000, 0x80008000, 0x90007000, 0x80008000]);
     /// assert_eq!(instructions[2].compile().view(),
-    ///     &[0x00000001, 0x00000020, 0x00000000, 0x00000004, 0x80008000,
+    ///     &[0x00000001, 0x00000020, 0x00000000, 0x00000002, 0x80008000,
     ///       0x80008000, 0x70007000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[3].compile().view(),
-    ///     &[0x00000001, 0x00000010, 0x00000000, 0x00000002, 0x80008000,
+    ///     &[0x00000001, 0x00000010, 0x00000000, 0x00000004, 0x80008000,
     ///       0x70006000, 0x80008000, 0x80008000, 0x80008000]);
     /// assert_eq!(instructions[4].compile().view(),
-    ///     &[0x00000001, 0x0000000b, 0x00000000, 0x00000007, 0x8ccc8ccc,
+    ///     &[0x00000001, 0x0000000b, 0x00000000, 0x0000000e, 0x8ccc8ccc,
     ///       0x8ccc8ccc, 0x70006000, 0x80008000, 0x80008000]);
     /// ```
     pub fn from_channels(input: &[(u16, u16, u16)], base: Option<(u16, u16)>,
