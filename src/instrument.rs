@@ -1213,8 +1213,13 @@ impl Instrument {
         let (mut upch, instrs) = SetDAC::from_channels(&input, base_voltage,
                 &ChannelState::VoltArb, &unselected_state)?;
 
-        // AMP PRP the channels involved; was -> self._amp_prep(None)
-        self._amp_prep(Some(&input.iter().map(|c| (c.0 as usize)).collect::<Vec<_>>()))?;
+        // AMP PRP the channels involved; If base voltage is supplied then *all* channels
+        // will have to be AMP PRPed as they will be set to VoltArb initially
+        if base.is_none() {
+            self._amp_prep(Some(&input.iter().map(|c| (c.0 as usize)).collect::<Vec<_>>()))?;
+        } else {
+            self._amp_prep(None)?;
+        }
 
         self.process(upch.compile())?;
         // this has now moved into the first loop see up
@@ -1269,7 +1274,10 @@ impl Instrument {
         // AMP PRPed to allow for the transition to happen without transients.
         let mut chans_to_prep = highs.to_vec();
         chans_to_prep.push(low);
-        self._amp_prep(Some(&chans_to_prep))?;
+        // This actually needs to AMP PRP all channels as a base voltage is applied
+        // above so all channels will be set to VoltArb
+        //self._amp_prep(Some(&chans_to_prep))?;
+        self._amp_prep(None)?;
         self.process(upch.compile())?;
         // was -> self._tia_state = TIAState::Open(ChanMask::all());
         self._tia_state.set_enabled(low, true);
@@ -1895,7 +1903,11 @@ impl Instrument {
         }
 
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
-        self._amp_prep(Some(&chans_to_prep))?;
+        //self._amp_prep(Some(&chans_to_prep))?;
+        // this also needs to AMP PRP all channels because in slow operation
+        // SetDAC::from_channels will set a voltage for the unselected
+        // channels (the "base" voltage)
+        self._amp_prep(None)?;
         self.process(conf.compile())?;
 
         // setup a non-high speed differential pulsing scheme
