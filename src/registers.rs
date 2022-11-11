@@ -1811,7 +1811,7 @@ impl BitAnd for &ChanMask {
         let other = other.bits.as_bitslice();
 
         for (i, (t, o)) in zip(slice, other).enumerate() {
-            output.set_enabled(i, *t & *o);
+            output.set_enabled(consts::NCHANS-1-i, *t & *o);
         }
 
         output
@@ -1831,7 +1831,7 @@ impl BitXor for &ChanMask {
         let other = other.bits.as_bitslice();
 
         for (i, (t, o)) in zip(slice, other).enumerate() {
-            output.set_enabled(i, *t ^ *o);
+            output.set_enabled(consts::NCHANS-1-i, *t ^ *o);
         }
         output
     }
