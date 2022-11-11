@@ -1120,6 +1120,7 @@ impl Instrument {
 
         for ch in input {
             chanconf.set(*ch, ChannelState::Open);
+            self._tia_state.set_enabled(*ch, true);
         }
 
         let mut upch = UpdateChannel::from_regs_default_source(&chanconf);
@@ -1200,7 +1201,6 @@ impl Instrument {
         for item in voltages {
             // item.0 is the channel number
             input.push((item.0, vidx!(item.1), vidx!(item.1)));
-            self._tia_state.set_enabled(item.0 as usize, true);
         }
 
 
@@ -1279,9 +1279,10 @@ impl Instrument {
         //self._amp_prep(Some(&chans_to_prep))?;
         self._amp_prep(None)?;
         self.process(upch.compile())?;
-        // was -> self._tia_state = TIAState::Open(ChanMask::all());
-        self._tia_state.set_enabled(low, true);
-        self._tia_state.set_channels_enabled(highs, true);
+        // this is not necessary as C READ is the same as setting channels
+        // as VoltArb
+        //self._tia_state.set_enabled(low, true);
+        //self._tia_state.set_channels_enabled(highs, true);
         // process them with the appropriate delay
         for mut instr in setdacs {
             self.process(instr.compile())?;
