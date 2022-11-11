@@ -859,14 +859,17 @@ impl Instrument {
                 ChanMask::from_channels(chans.unwrap())
             } else { ChanMask::all() });
 
+            // No channels need to be AMP PRPd, just return
+            if common.is_empty() {
+                return Ok(self);
+            }
+
             // Only prepare channels that are common in chans
             // and self._tia_state
             let mut amp_prep = AmpPrep::new(&common);
 
             // this sets the channels in common as 0
             // essentially this means
-            // self._tia_state = self._tia_state ^ common
-            // was -> self._tia_state = TIAState::Closed;
             self._tia_state = &self._tia_state ^ &common;
             // set DACs for common channels to 0V and connect to GND
             // was -> self.ground_all_fast()?;
