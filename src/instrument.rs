@@ -1269,7 +1269,7 @@ impl Instrument {
 
         // generate a list of dac settings, only one channel in this case
         let (mut upch, setdacs) = SetDAC::from_channels(&[(low as u16, vread, vread)],
-            Some((zero, zero)), &ChannelState::VoltArb, &ChannelState::Open)?;
+            Some((zero, zero)), &ChannelState::VoltArb, &ChannelState::Maintain)?;
 
         // Is this necessary here?
         // Yes it is necessary, as the UP CH following this will transition
@@ -1330,7 +1330,14 @@ impl Instrument {
 
         self._amp_prep(Some(&highs))?;
 
-        let mut channelconf = UpdateChannel::from_regs_global_state(ChannelState::VoltArb);
+        // Create the channel states for the operation; by default set all channels
+        // to Maintain and put only the channel in `highs` as VoltArb.
+        let mut channelstates = ChannelConf::new_with_state(ChannelState::Maintain);
+        for c in highs {
+            channelstates.set(*c, ChannelState::VoltArb);
+        }
+
+        let mut channelconf = UpdateChannel::from_regs_default_source(&channelstates);
         self.process(channelconf.compile())?;
 
         let mut adcmask = ChanMask::new();
