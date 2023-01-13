@@ -437,7 +437,6 @@ fn _adc_to_voltage(val: u32) -> f32 {
     let uval = i32::from_be_bytes(bytes);
 
     let val: f32;
-    let res: f32;
 
     // same as in _adc_to_current check if the ADC has
     // overflowed and subtract 2^{18}
@@ -447,12 +446,10 @@ fn _adc_to_voltage(val: u32) -> f32 {
         val = uval as f32;
     }
 
-    if range == 0x81 || range == 0x82 || range == 0x84 || range == 0x88 {
+    // Check if the READ ok bit is set (MSB of the first byte)
+    if (range & (1 << 7)) > 0 {
         20.48 * (val / 2.0f32.powf(18.0))
-    } else if range == 0x90 || range == 0xa0 || range == 0xc0 {
-        10.24 * (val / 2.0f32.powf(18.0))
     } else {
-        // unknown range
         f32::NAN
     }
 
