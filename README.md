@@ -15,15 +15,21 @@ you can do so by adding the following to you `Cargo.toml`.
 
 ```toml
 [dependencies]
-libarc2 = { git = "https://github.com/arc-instruments/libarc2" }
+libarc2 = "0.2"
 ```
 
-As the library stabilises regular Rust crates will be made available.
+The library is still under development and more features are added constantly.
+An effort is made to maintain a consistent API but there is no API stability
+guarantee until we hit 1.0.
 
 ## Requirements
 
 To actually talk to an ArC TWO board you will need the beastlink FPGA library.
 Detailed instructions are available on the
 [beastlink-rs](https://github.com/arc-instruments/beastlink-rs#prerequisites)
-repository. For Windows a Python script is included to pull the necessary DLLs
-into the working directory if you intend to build `libarc2` yourself.
+repository. The Python wheels of the `libarc2` bindings include all necessary
+libraries but if you are using `libarc2` itself you need to make them available
+for the Rust compiler to link against. For Windows a Python script is included
+to pull the necessary DLLs into the working directory. For Linux follow the
+instructions on the beastlink-rs repository to build appropriate packages for
+your distribution (for Debian, RedHat, Archlinux and their derivatives).
