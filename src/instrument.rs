@@ -2440,12 +2440,10 @@ impl Instrument {
 
             let chunk = match read_at {
                 ReadAt::Bias => {
-                    slf._amp_prep(Some(&[low, high]))?
-                       ._read_slice_inner(low, &[high], vidx!(-bias_voltage))?
+                    slf._read_slice_inner(low, &[high], vidx!(-bias_voltage))?
                 },
                 ReadAt::Arb(arbv) => {
-                    slf._amp_prep(Some(&[low, high]))?
-                       ._read_slice_inner(low, &[high], vidx!(-arbv))?
+                    slf._read_slice_inner(low, &[high], vidx!(-arbv))?
                 },
                 // if ReadAt or ReadAfter is never no reads will ever be performed
                 ReadAt::Never => {
