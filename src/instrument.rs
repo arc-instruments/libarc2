@@ -2502,11 +2502,13 @@ impl Instrument {
             for pidx in 0..num_pulses {
 
                 if pw_nanos < 500_000_000u128 {
-                    self.pulse_one_fast(low, high, v, pw_nanos)?
-                        .ground_all_fast()?;
+                    self.pulse_one_fast(low, high, v, pw_nanos)?;
                 } else {
-                    self.pulse_one_slow(low, high, v, pw_nanos)?
-                        .ground_all_fast()?;
+                    self.pulse_one_slow(low, high, v, pw_nanos)?;
+                }
+
+                if inter_nanos > 0u128 {
+                    self.ground_all_fast()?;
                 }
 
                 // No reads are required; interpulse wait and loop to
