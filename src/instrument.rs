@@ -1538,12 +1538,6 @@ impl Instrument {
             chunk.flag_addr(), VALUEAVAILFLAG);
         self.process(voltageread.compile())?;
 
-        if avg {
-            self.add_delay(320_000)?;
-        } else {
-            self.add_delay(10_000)?;
-        }
-
         self.execute()?;
         self.wait();
 
