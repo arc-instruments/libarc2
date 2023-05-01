@@ -1551,6 +1551,105 @@ impl Instrument {
 
     }
 
+
+    /// Perform a series of current reads on the specified channels, with an optional delay.
+    /// This needs to be followed by an `execute` similar to [`Instrument::generate_ramp`].
+    /// Low channels can be empty
+    pub fn generate_read_train(&mut self, lows: &[usize], highs: &[usize], vread: f32,
+        nreads: usize, inter_nanos: u128, ground: bool) -> Result<&mut Self, ArC2Error> {
+
+        // Prepare the low voltage end configuration
+        let lowconf: Option<Vec<(u16, f32)>> = if lows.len() > 0 {
+            let mut vec = Vec::with_capacity(lows.len());
+            for c in lows {
+                vec.push((*c as u16, -vread));
+            }
+            Some(vec)
+        } else {
+            None
+        };
+
+        // Prepare the high end (current is read from there); this probably needs to
+        // be done once
+        self._amp_prep(Some(&highs))?;
+        let mut channelstates = ChannelConf::new_with_state(ChannelState::Maintain);
+        let mut adcmask = ChanMask::new();
+        for c in highs {
+            channelstates.set(*c, ChannelState::VoltArb);
+            adcmask.set_enabled(*c, true);
+        }
+
+        let mut channelconf = UpdateChannel::from_regs_default_source(&channelstates);
+        self.process(channelconf.compile())?;
+
+        let sender = self._sender.clone();
+        for _ in 0..nreads {
+
+            // Setup the biasing end
+            match lowconf {
+                Some(ref conf) => { self.config_channels(&conf, None)?; },
+                _ => {}
+            };
+
+            // Perform the current read
+            let chunk = self.make_chunk()?;
+            let mut currentread = CurrentRead::new(&adcmask, chunk.addr(),
+                chunk.flag_addr(), VALUEAVAILFLAG);
+            self.process(currentread.compile())?;
+            if ground {
+                self.ground_slice_fast(&highs)?;
+                match lowconf {
+                    Some(_) => { self.ground_slice_fast(&lows)?; },
+                    _ => {}
+                }
+            }
+            if inter_nanos > 0u128 {
+                self.add_delay(inter_nanos+1_000u128)?;
+            }
+
+            match sender.send(Some(chunk)) {
+                Ok(()) => {},
+                Err(err) => { return Err(ArC2Error::from(err)); }
+            }
+        }
+
+        Ok(self)
+
+    }
+
+
+    /// Perform a series of voltage reads on the specified channels, with an optional delay.
+    /// This function needs to be followed by an `execute` similar to
+    /// [`Instrument::generate_ramp`]
+    pub fn generate_vread_train(&mut self, uchans: &[usize], avg: bool,
+        npulses: usize, inter_nanos: u128)
+        -> Result<&mut Self, ArC2Error> {
+
+        let mut mask = ChanMask::none();
+        for c in uchans {
+            mask.set_enabled(*c, true);
+        }
+
+        let sender = self._sender.clone();
+        for _ in 0..npulses {
+
+            let chunk = self.make_chunk()?;
+            let mut voltageread = VoltageRead::new(&mask, avg, chunk.addr(),
+                chunk.flag_addr(), VALUEAVAILFLAG);
+            self.process(voltageread.compile())?;
+            if inter_nanos > 0u128 {
+                self.add_delay(inter_nanos)?;
+            }
+            match sender.send(Some(chunk)) {
+                Ok(()) => {},
+                Err(err) => { return Err(ArC2Error::from(err)); }
+            }
+        }
+
+        Ok(self)
+    }
+
+
     /// Check if the FPGA FIFO buffer is busy. The FPGA's FIFO buffer is regarded as busy
     /// if it's not empty, which means all the instructions have not yet been consumed.
     /// This is crucial for operations that include long delays. The output buffer should
