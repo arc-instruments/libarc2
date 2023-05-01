@@ -29,7 +29,7 @@ const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
 
 const INBUF: usize = 64*std::mem::size_of::<u32>();
 const VALUEAVAILFLAG: u32 = 0xcafebabe;
-const INSTRCAP: usize = 768*9*std::mem::size_of::<u32>();
+const INSTRCAP: usize = 2048*9*std::mem::size_of::<u32>();
 
 // We are caching common instructions
 lazy_static! {
