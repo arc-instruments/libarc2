@@ -9,8 +9,17 @@ macro_rules! vidx {
 
     ($val:expr) => {
         vidx!($val, 10.0, 3.05179e-4)
+    };
+
+    ($val:expr, $range:expr) => {
+        if $range == OutputRange::EXT {
+            vidx!($val, 20.0, 6.10358e-4)
+        } else {
+            vidx!($val, 10.0, 3.05179e-4)
+        }
     }
 }
+
 
 #[cfg(feature="debug_packets")]
 macro_rules! instrdbg {

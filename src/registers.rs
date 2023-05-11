@@ -174,6 +174,8 @@ pub enum OpCode {
     SetDACOffset   = 0x00001000,
     /// Delay (20 ns precision)
     Delay          = 0x00002000,
+    /// DAC Range
+    DACRange       = 0x00004000,
     /// OpAmp preparation
     AmpPrep        = 0x00010000
 }
@@ -244,6 +246,7 @@ impl OutputRange {
     pub const STD: OutputRange = Self(false);
     /// Extended output range ± 20 V - 600 μV precision
     pub const EXT: OutputRange = Self(true);
+
 }
 
 impl PartialEq for OutputRange {
