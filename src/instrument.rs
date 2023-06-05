@@ -688,7 +688,13 @@ impl Instrument {
     /// Read a chunk's contents in a word, bit or full mode
     fn read_chunk(&self, chunk: &mut Chunk, mode: &DataMode, rtype: &ReadType) -> Result<Vec<f32>, ArC2Error> {
 
-
+        if chunk.is_dummy() {
+            match mode {
+                DataMode::Words => { return Ok(vec![0.0f32; 32]) },
+                DataMode::Bits => { return Ok(vec![0.0f32; 32]) },
+                DataMode::All => { return Ok(vec![0.0f32; 64]) }
+            }
+        }
 
         let ret: Vec<f32> = match rtype {
             ReadType::Current => {
@@ -715,9 +721,6 @@ impl Instrument {
         let mut memman = _memman.write().unwrap();
         memman.free_chunk(chunk)?;
 
-        /*
-         * TODO: Zero offset flag when this is supported by the FPGA
-         */
         #[cfg(feature="flag_addresses")] {
             let _efm = self.efm.clone();
             let efm = _efm.lock().unwrap();

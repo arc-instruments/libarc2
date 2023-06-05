@@ -52,7 +52,8 @@ impl std::error::Error for MemoryError {}
 /// data there.
 pub(crate) struct Chunk {
     _addr: u32,
-    _valid: bool
+    _valid: bool,
+    _dummy: bool,
 }
 
 impl std::fmt::Debug for Chunk {
@@ -60,6 +61,7 @@ impl std::fmt::Debug for Chunk {
         f.debug_struct("Chunk")
          .field("_addr", &format_args!("0x{:08x}", &self._addr))
          .field("_valid", &self._valid)
+         .field("_dummy", &self._dummy)
          .finish()
     }
 }
@@ -68,7 +70,12 @@ impl Chunk {
 
     /// Create a new Chunk at the specified address
     pub fn new(addr: u32) -> Self {
-        Chunk { _addr: addr, _valid: true }
+        Chunk { _addr: addr, _valid: true, _dummy: false }
+    }
+
+    /// Create a new dummy Chunk for synchronisation purposes
+    pub(crate) fn dummy() -> Self {
+        Chunk { _addr: 0x0, _valid: true, _dummy: true }
     }
 
     /// The memory associated with this chunk
@@ -92,6 +99,10 @@ impl Chunk {
     /// represented by the chunk is available to reuse.
     fn is_valid(&self) -> bool {
         self._valid
+    }
+
+    pub(crate) fn is_dummy(&self) -> bool {
+        self._dummy
     }
 
     /// Mark the memory region represented by this chunk as
@@ -197,6 +208,12 @@ impl MemMan {
     /// Release the address represented by a [`Chunk`] back into the
     /// available memory pool.
     pub fn free_chunk(&mut self, chunk: &mut Chunk) -> Result<(), MemoryError> {
+
+        if chunk.is_dummy() {
+            chunk.invalidate();
+            return Ok(())
+        }
+
         if !chunk.is_valid() {
             return Err(MemoryError::EDFREE);
         }
