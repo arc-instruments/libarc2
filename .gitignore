@@ -6,5 +6,6 @@ target/*
 *.la
 *.lo
 *.o
-./*.lib
+*.dll
+*.lib
 localtests/*
