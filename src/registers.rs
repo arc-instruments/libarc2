@@ -10,7 +10,7 @@ use std::time::Duration;
 use num_derive::{FromPrimitive, ToPrimitive};
 use bitvec::prelude::*;
 use bitflags::bitflags;
-use num_traits::{FromPrimitive};
+use num_traits::{ToPrimitive, FromPrimitive};
 use thiserror::Error;
 use std::ops::{BitAnd, BitXor};
 use std::iter::zip;
@@ -1191,23 +1191,85 @@ mod channelconf_tests {
     }
 }
 
+bitflags! {
+    /// Resistor selection for current source configuration
+    ///
+    /// Use this struct with [`CurrentSourceState::mos_with_resistors`] to
+    /// create an appropriately configured register for sourcing/sinking
+    /// current.
+    pub struct CurrentSourceResistor: u8 {
+        const R220K = 0b01000000;
+        const R3_6M = 0b00100000;
+        const R68M  = 0b00010000;
+        const R51   = 0b00000100;
+        const RDIGI = 0b00000010;
+    }
+}
 
-/// Current source configuration.
-///
-/// When a current source is in operation this enum
-/// specifies its operation state and it is part of the
-/// [`SourceConf`] register.
-#[derive(Clone, Copy, FromPrimitive, ToPrimitive, Debug)]
+#[derive(Clone, Copy, FromPrimitive, ToPrimitive, PartialEq, Debug)]
 #[repr(u8)]
-pub enum CurrentSourceState {
-    /// Maintain current status (default)
-    Maintain   = 0b00000000,
-    /// Disconnect current source
-    Open       = 0b00000001,
-    /// Arbitrary voltage operation
-    VoltageArb = 0b00000010,
-    /// High speed voltage pulse operation
-    HiSpeed    = 0b00000011
+pub enum CurrentSourceMOSFET {
+    NMOS = 0b10000000,
+    PMOS = 0b00001000
+}
+
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct CurrentSourceState(u8);
+
+impl CurrentSourceState {
+
+    /// Generate a new current source configuration connected to the
+    /// internal 2.5 V reference source
+    pub fn vref() -> CurrentSourceState {
+        // Assert bits 0 and 7 (2.5V and NMOS)
+        CurrentSourceState(0b10000001)
+    }
+
+    /// Generate a current source configuration with either a PMOS or NMOS and at
+    /// least one current source resistor. This can be any of the fixed series
+    /// resistances or a digipot. Please not that the actual digipot value is not
+    /// configured here but through the higher level instruction
+    /// [`crate::instructions::UpdateChannel`].
+    ///
+    /// ```
+    /// use libarc2::registers::{CurrentSourceState, CurrentSourceMOSFET};
+    /// use libarc2::registers::CurrentSourceResistor;
+    ///
+    /// let state0 = CurrentSourceState::mos_with_resistors(
+    ///     CurrentSourceMOSFET::PMOS, CurrentSourceResistor::R220K | CurrentSourceResistor::RDIGI);
+    ///
+    /// let rawval = state0.to_u8();
+    /// assert_eq!(rawval, 0b01001010);
+    /// assert!(rawval & CurrentSourceResistor::R220K.bits() > 0);
+    /// assert!(rawval & CurrentSourceResistor::RDIGI.bits() > 0);
+    /// assert!(rawval & CurrentSourceResistor::R51.bits() == 0);
+    /// ```
+    pub fn mos_with_resistors(mos: CurrentSourceMOSFET, res: CurrentSourceResistor)
+        -> CurrentSourceState {
+
+        // This is safe as we know it fits in a u8
+        let mut val: u8 = mos.to_u8().unwrap();
+        val |= res.bits();
+
+        CurrentSourceState(val)
+    }
+
+    /// Get the internal representation of this register
+    pub fn to_u8(self) -> u8 {
+        self.0
+    }
+
+    /// Get selected MOSFET for this register
+    pub fn get_mos(self) -> Option<CurrentSourceMOSFET> {
+        if (self.0 & CurrentSourceMOSFET::NMOS.to_u8().unwrap()) > 0 {
+            Some(CurrentSourceMOSFET::NMOS)
+        } else if (self.0 & CurrentSourceMOSFET::PMOS.to_u8().unwrap()) > 0 {
+            Some(CurrentSourceMOSFET::PMOS)
+        } else {
+            None
+        }
+    }
 }
 
 
@@ -1235,12 +1297,11 @@ impl SourceConf {
         SourceConf { bits: vec }
     }
 
-    /// Set digipot raw value. This is clamped between
-    /// 0x000 and 0x300 to keep the instrument safe.
+    /// Set digipot raw value. This is clamped to 2^10-1
     pub fn set_digipot(&mut self, val: u16) {
         let actual_val;
-        if val > 0x300 {
-            actual_val = 0x300;
+        if val > 0x3ff {
+            actual_val = 0x3ff;
         } else {
             actual_val = val;
         }
@@ -1257,13 +1318,13 @@ impl SourceConf {
     /// Set state output. See [`CurrentSourceState`] for possible
     /// values.
     pub fn set_cursource_state(&mut self, val: CurrentSourceState) {
-        self.bits[28..32].store(val as u8);
+        self.bits[24..32].store(val.to_u8());
     }
 
     /// Retrieves the current source state stores in this register.
     pub fn get_cursource_state(&self) -> CurrentSourceState {
         let val = self.bits[24..32].load::<u8>();
-        CurrentSourceState::from_u8(val).unwrap()
+        CurrentSourceState(val)
     }
 }
 
@@ -1277,8 +1338,7 @@ impl ToU32s for SourceConf {
 #[cfg(test)]
 mod sourceconftests {
 
-    use super::{SourceConf, CurrentSourceState, ToU32s};
-    use assert_matches::assert_matches;
+    use super::{SourceConf, ToU32s};
 
     #[test]
     fn test_sourceconf() {
@@ -1289,16 +1349,9 @@ mod sourceconftests {
         let slice = c.as_u32s();
         assert_eq!(slice[0], 0x80000000);
 
-        c.set_cursource_state(CurrentSourceState::HiSpeed);
-        assert_matches!(c.get_cursource_state(),
-            CurrentSourceState::HiSpeed);
-
-        let slice = c.as_u32s();
-        assert_eq!(slice[0], 0x80000003);
-
-        // Digipot must never exceed 0x300
-        c.set_digipot(0x400);
-        assert_eq!(c.get_digipot(), 0x300);
+        // Digipot must never exceed 0x3ff
+        c.set_digipot(0x500);
+        assert_eq!(c.get_digipot(), 0x3ff);
 
     }
 }
