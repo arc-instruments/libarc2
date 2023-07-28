@@ -6,6 +6,7 @@
 //! trait that converts them into a serialisable `Vec<u32>`. This can be
 //! then be processed by ArC2.
 
+use std::collections::HashMap;
 use std::time::Duration;
 use num_derive::{FromPrimitive, ToPrimitive};
 use bitvec::prelude::*;
@@ -1206,6 +1207,24 @@ bitflags! {
     }
 }
 
+lazy_static! {
+    static ref FIXED_RESISTORS: HashMap<CurrentSourceResistor, f32> = {
+        let mut map: HashMap<CurrentSourceResistor, f32> = HashMap::new();
+        map.insert(CurrentSourceResistor::R220K, 220e3);
+        map.insert(CurrentSourceResistor::R3_6M, 3.6e6);
+        map.insert(CurrentSourceResistor::R68M, 68e6);
+        map.insert(CurrentSourceResistor::R51, 51.0);
+        map
+    };
+}
+
+impl CurrentSourceResistor {
+    fn value(self) -> Option<f32> {
+        FIXED_RESISTORS.get(&self).copied()
+    }
+}
+
+
 #[derive(Clone, Copy, FromPrimitive, ToPrimitive, PartialEq, Debug)]
 #[repr(u8)]
 pub enum CurrentSourceMOSFET {
@@ -1270,6 +1289,17 @@ impl CurrentSourceState {
             None
         }
     }
+
+    /// Returns the bitflags for the selected current source resistor,
+    /// or None if no resistors are selected
+    pub fn get_selected_resistors(self) -> Option<CurrentSourceResistor> {
+        let v: u8 = self.0 & 0b01110110;
+        if v == 0 {
+            None
+        } else {
+            Some(CurrentSourceResistor { bits: v })
+        }
+    }
 }
 
 
@@ -1326,6 +1356,73 @@ impl SourceConf {
         let val = self.bits[24..32].load::<u8>();
         CurrentSourceState(val)
     }
+
+    fn _find_digipot_and_voltage(current: f32) -> Option<(f32, f32)> {
+        let mut voltage: f32 = 1.0;
+        let acurrent = current.abs();
+
+        // We start from 1.0 V and work our way down in 50 mV steps to
+        // find the first valid digipot resistance. If we drop below
+        // then no voltage/resistance configuration exists.
+        while voltage > 0.049 {
+            let res = voltage / acurrent;
+            // Resistance must be between 670 Ω and 19.5 kΩ
+            // (safe digipot values)
+            if res < 19500.0 && res > 670.0 {
+                return Some((voltage, res));
+            }
+            voltage -= 0.05;
+        }
+        None
+    }
+
+    /// Construct a new source configuration for a specified current.
+    /// This will also return the associated voltage drop required
+    /// between the CREF and CSET references to satisfy the requirements.
+    /// If no possible configuration exists for the selected current the
+    /// function will return `None`.
+    pub fn for_current(current: f32) -> Option<(SourceConf, f32)> {
+
+        let mut sourceconf = SourceConf::new();
+
+        let mosfet = if current > 0.0 {
+            CurrentSourceMOSFET::NMOS
+        } else {
+            CurrentSourceMOSFET::PMOS
+        };
+
+        // Check if we can produce the necessary current with on of the values
+        // in the fixed resistor bank
+        for res in &[CurrentSourceResistor::R51, CurrentSourceResistor::R220K,
+            CurrentSourceResistor::R3_6M, CurrentSourceResistor::R68M] {
+
+            // unwrap here is safe as the fixed resistors have predefined
+            // values in the FIXED_RESISTORS map
+            let voltage = res.value().unwrap() * current.abs();
+            if voltage > 0.05 && voltage <= 1.0 {
+                // found voltage + resistor combination
+                let state = CurrentSourceState::mos_with_resistors(mosfet, *res);
+                sourceconf.set_cursource_state(state);
+                return Some((sourceconf, voltage));
+            }
+        }
+
+        // If we reach this point it means we need to use the digipot instead of
+        // the fixed resistors
+        match Self::_find_digipot_and_voltage(current) {
+            Some ((resistance, voltage)) => {
+                let code = (1024.0*(1.0 - resistance/20000.0)).floor() as u16;
+                let state = CurrentSourceState::mos_with_resistors(mosfet,
+                    CurrentSourceResistor::RDIGI);
+                sourceconf.set_digipot(code);
+                sourceconf.set_cursource_state(state);
+                Some((sourceconf, voltage))
+            }
+            None => None
+        }
+
+    }
+
 }
 
 impl ToU32s for SourceConf {
