@@ -1398,6 +1398,9 @@ impl Instrument {
     ///
     /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
     /// to a row read at `vread` in a standard 32×32 array, otherwise it's a column read.
+    /// Please note that this function implies a 32×32 array operation and exists for
+    /// convenience. If you require arbitrary channel reading use the
+    /// [`Instrument::read_slice_open`] function.
     pub fn read_slice(&mut self, chan: usize, vread: f32) -> Result<Vec<f32>, ArC2Error> {
 
         // Reset DAC configuration
@@ -1436,7 +1439,9 @@ impl Instrument {
     /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
     /// to a row read at `vread` in a standard 32×32 array, otherwise it's a column read.
     /// This is equivalent to read_slice but replaces channels not contained in the
-    /// mask with `f32::NAN`.
+    /// mask with `f32::NAN`. As with [`Instrument::read_slice`] this function assumes an
+    /// array. Reading arbitrary channels should be done via [`Instrument::read_slice_open`]
+    /// on the unmasked channels.
     pub fn read_slice_masked(&mut self, chan: usize, mask: &[usize], vread: f32) -> Result<Vec<f32>, ArC2Error> {
 
         // Reset DAC configuration
@@ -1497,7 +1502,10 @@ impl Instrument {
     /// in channel order. When order is `Columns` the low potential channels are `[16..32)`
     /// and `[48..64)` (wordlines). When order is `Rows` the low potential channels are
     /// `[0..16)` and `[32..48)` (bitlines). Function [`Instrument::read_slice()`] is
-    /// applied for every one of the selected channels.
+    /// applied for every one of the selected channels. This function implies the configuration
+    /// of the channels in a 32×32 array and assumes that 32 are of those are at a unified
+    /// lower voltage (typically 0.0 V). If you need to read all 64 channels in an arbitrary
+    /// fashion use [`Instrument::read_slice_open`].
     pub fn read_all(&mut self, vread: f32, order: BiasOrder) -> Result<Vec<f32>, ArC2Error> {
 
         let mut results = Vec::with_capacity(32*32);
@@ -1787,7 +1795,11 @@ impl Instrument {
     /// Apply a pulse to all channels with `chan` as the low potential channel.
     ///
     /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
-    /// to a row pulse, otherwise it's a column pulse.
+    /// to a row pulse, otherwise it's a column pulse. This function assumes that
+    /// channels are configured in a 32×32 array fashion. To pulse arbitrary channels
+    /// use [`Instrument::pulse_slice_fast_open`] for pulses up to 500 ms and
+    /// [`Instrument::config_channels`] with a hardware delay, [`Instrument::add_delay`],
+    /// for pulses longer than that.
     pub fn pulse_slice(&mut self, chan: usize, voltage: f32, nanos: u128) -> Result<&mut Self, ArC2Error> {
 
         // use the high speed driver for all pulses faster than 500 ms
@@ -1805,7 +1817,8 @@ impl Instrument {
     /// If `chan` is between 0 and 15 or 32 and 47 (inclusive) this will correspond
     /// to a row pulse, otherwise it's a column pulse. When `preset_state`
     /// is true the state of high speed drivers will be initialised before the actual pulsing
-    /// sequence begins.
+    /// sequence begins. Similar to [`Instrument::pulse_slice`] this assumes a 32×32
+    /// array.
     pub fn pulse_slice_masked(&mut self, chan: usize, mask: &[usize], voltage: f32, nanos: u128) -> Result<&mut Self, ArC2Error> {
 
         // use the high speed driver for all pulses faster than 500 ms
@@ -2286,6 +2299,7 @@ impl Instrument {
     ///
     /// This function will pulse available crosspoints on the array. This can be done
     /// either by high biasing the rows ([`BiasOrder::Rows`]) or columns ([`BiasOrder::Columns`]).
+    /// This function assumens that channels are arranged in a 32×32 array.
     pub fn pulse_all(&mut self, voltage: f32, nanos: u128, order: BiasOrder) -> Result<&mut Self, ArC2Error> {
 
         let bias_channels = match order {
@@ -2352,7 +2366,8 @@ impl Instrument {
     }
 
     /// Pulse and read a slice. Semantics and arguments follow the same conventions as
-    /// [`Instrument::read_slice`] and [`Instrument::pulse_slice`];
+    /// [`Instrument::read_slice`] and [`Instrument::pulse_slice`]. It assumes a 32×32
+    /// array similar to [`Instrument::pulse_slice`].
     pub fn pulseread_slice(&mut self, chan: usize, vpulse: f32, nanos: u128, vread: f32) -> Result<Vec<f32>, ArC2Error> {
 
         let mode: DataMode;
@@ -2385,7 +2400,8 @@ impl Instrument {
     }
 
     /// Pulse and immediately read all crosspoints. Semantics and arguments follow the same
-    /// conventions as [`Instrument::read_all`] and [`Instrument::pulse_all'].
+    /// conventions as [`Instrument::read_all`] and [`Instrument::pulse_all']. It assumes a
+    /// 32×32 array similar to [`Instrument::pulse_all`].
     pub fn pulseread_all(&mut self, vpulse: f32, nanos: u128, vread: f32, order: BiasOrder) -> Result<Vec<f32>, ArC2Error> {
 
         let mode: DataMode;
@@ -2440,7 +2456,7 @@ impl Instrument {
 
     /// Pulse and read the specified high channels that have `chan` as the low potential channel.
     /// Semantics and arguments follow the same conventions as [`Instrument::read_slice_masked`]
-    /// and [`Instrument::pulse_slice_masked`].
+    /// and [`Instrument::pulse_slice_masked`]. The function assumes a 32×32 array.
     pub fn pulseread_slice_masked(&mut self, chan: usize, mask: &[usize], vpulse: f32,
         nanos: u128, vread: f32) -> Result<Vec<f32>, ArC2Error> {
 
