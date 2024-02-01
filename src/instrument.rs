@@ -139,6 +139,9 @@ pub enum ArC2Error {
     /// Invalid ramp parameters
     #[error("Ramp operation error: Vstart {0}, Vstop {1}, Vstep {2}")]
     RampOperationError(f32, f32, f32),
+    /// Invalid voltage or current
+    #[error("Invalid voltage or current argument: {0}")]
+    InvalidValue(f32),
     /// Output buffer access error
     #[error("Cannot store address {0} to output buffer")]
     OutputBufferError(i64),
@@ -1562,6 +1565,34 @@ impl Instrument {
 
     }
 
+    /// Connect selected channels to the current source targeting a specific
+    /// current. Setting `preset_range` to `true` will generate extra instructions
+    /// to reconfigure the source to the necessary range for the selected
+    /// current. Obviously connecting more than one channels to the current
+    /// source will split (probably unevenly) the current between the connected
+    /// DUTs. Please note that configuring the source only affects the dynamic end
+    /// of the connection (where current is sourced/sinked from/to). The static
+    /// end of any DUT must be configured separately.
+    pub fn config_current_source(&mut self, chans: &[usize], current: f32,
+        preset_range: bool) -> Result<&mut Self, ArC2Error> {
+
+        if current.is_nan() {
+            return Err(ArC2Error::InvalidValue(current))
+        }
+
+        let cvolt_base = current.signum()*10.0;
+        if preset_range {
+            let mut chanconf = ChannelConf::new();
+            // ensure that channels connected to the current source
+            // are floating
+            for c in chans {
+                chanconf.set(*c, ChannelState::Open);
+            }
+            self.config_aux_channels(
+                &[(AuxDACFn::CSET, cvolt_base), (AuxDACFn::CREF, cvolt_base)])?;
+        }
+        Ok(self)
+    }
 
     /// Perform a series of current reads on the specified channels, with an optional delay.
     /// This needs to be followed by an `execute` similar to [`Instrument::generate_ramp`].
