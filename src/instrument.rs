@@ -28,24 +28,24 @@ const BLFLAGS_W: bl::Flags = bl::Flags::ConstAddress;
 const BLFLAGS_R: bl::Flags = bl::Flags::NoFlags;
 
 const INBUF: usize = 64*std::mem::size_of::<u32>();
-const VALUEAVAILFLAG: u32 = 0xcafebabe;
+pub(crate) const VALUEAVAILFLAG: u32 = 0xcafebabe;
 const INSTRCAP: usize = 2048*9*std::mem::size_of::<u32>();
 
 // We are caching common instructions
 lazy_static! {
-    static ref UPDATE_DAC: UpdateDAC = {
+    pub(crate) static ref UPDATE_DAC: UpdateDAC = {
         let mut instr = UpdateDAC::new();
         instr.compile();
         instr
     };
 
-    static ref RESET_DAC: ResetDAC = {
+    pub(crate) static ref RESET_DAC: ResetDAC = {
         let mut instr = ResetDAC::new();
         instr.compile();
         instr
     };
 
-    static ref SET_3V3_LOGIC: SetDAC = {
+    pub(crate) static ref SET_3V3_LOGIC: SetDAC = {
         let mut instr = SetDAC::new_3v3_logic();
         instr.compile();
         instr
@@ -67,7 +67,7 @@ lazy_static! {
         instr
     };
 
-    static ref ZERO_HS_TIMINGS: HSConfig = {
+    pub(crate) static ref ZERO_HS_TIMINGS: HSConfig = {
         let mut instr = HSConfig::new([0u32; 8]);
         instr.compile();
         instr
@@ -517,7 +517,7 @@ impl Instrument {
     pub fn open_with_fw(id: i32, path: &str, retained_mode: bool) -> Result<Instrument, ArC2Error> {
         let mut instr = Instrument::open(id, retained_mode)?;
         instr.load_firmware(&path)?;
-        instr._amp_prep(None)?;
+        instr.amp_prep(None)?;
         instr.process(&*RESET_DAC)?;
         instr.process(&*SET_3V3_LOGIC)?;
         instr.process(&*UPDATE_DAC)?;
@@ -677,7 +677,7 @@ impl Instrument {
     }
 
     /// Allocate a memory area
-    fn make_chunk(&self) -> Result<Chunk, ArC2Error> {
+    pub(crate) fn make_chunk(&self) -> Result<Chunk, ArC2Error> {
         let _memman = self.memman.clone();
         let mut memman = _memman.write().unwrap();
 
@@ -689,7 +689,7 @@ impl Instrument {
     }
 
     /// Read a chunk's contents in a word, bit or full mode
-    fn read_chunk(&self, chunk: &mut Chunk, mode: &DataMode, rtype: &ReadType) -> Result<Vec<f32>, ArC2Error> {
+    pub(crate) fn read_chunk(&self, chunk: &mut Chunk, mode: &DataMode, rtype: &ReadType) -> Result<Vec<f32>, ArC2Error> {
 
         if chunk.is_dummy() {
             match mode {
@@ -791,7 +791,7 @@ impl Instrument {
         self.process(&*RESET_DAC)?;
         self.process(&*UPDATE_DAC)?;
         self.add_delay(30_000u128)?;
-        self._amp_prep(None)?;
+        self.amp_prep(None)?;
         self.process(&*CHAN_ARB_ALL)?;
 
         Ok(self)
@@ -812,7 +812,7 @@ impl Instrument {
         }
 
         self.add_delay(30_000u128)?;
-        self._amp_prep(Some(chans))?;
+        self.amp_prep(Some(chans))?;
         // MOD CH should come after amp prep
         self.process(upch.compile())?;
 
@@ -856,7 +856,7 @@ impl Instrument {
     }
 
     /// Prepare the DACs for transition to VoltArb or CurrentRead
-    fn _amp_prep(&mut self, chans: Option<&[usize]>) -> Result<&mut Self, ArC2Error> {
+    pub(crate) fn amp_prep(&mut self, chans: Option<&[usize]>) -> Result<&mut Self, ArC2Error> {
 
             let common = &self._tia_state & &(if chans.is_some() {
                 ChanMask::from_channels(chans.unwrap())
@@ -1222,9 +1222,9 @@ impl Instrument {
         // AMP PRP the channels involved; If base voltage is supplied then *all* channels
         // will have to be AMP PRPed as they will be set to VoltArb initially
         if base.is_none() {
-            self._amp_prep(Some(&input.iter().map(|c| (c.0 as usize)).collect::<Vec<_>>()))?;
+            self.amp_prep(Some(&input.iter().map(|c| (c.0 as usize)).collect::<Vec<_>>()))?;
         } else {
-            self._amp_prep(None)?;
+            self.amp_prep(None)?;
         }
 
         self.process(upch.compile())?;
@@ -1282,8 +1282,8 @@ impl Instrument {
         chans_to_prep.push(low);
         // This actually needs to AMP PRP all channels as a base voltage is applied
         // above so all channels will be set to VoltArb
-        //self._amp_prep(Some(&chans_to_prep))?;
-        self._amp_prep(None)?;
+        //self.amp_prep(Some(&chans_to_prep))?;
+        self.amp_prep(None)?;
         self.process(upch.compile())?;
         // this is not necessary as C READ is the same as setting channels
         // as VoltArb
@@ -1331,7 +1331,7 @@ impl Instrument {
     /// after the measurement has gone through.
     pub fn read_slice_open(&mut self, highs: &[usize], ground: bool) -> Result<Vec<f32>, ArC2Error> {
 
-        self._amp_prep(Some(&highs))?;
+        self.amp_prep(Some(&highs))?;
 
         // Create the channel states for the operation; by default set all channels
         // to Maintain and put only the channel in `highs` as VoltArb.
@@ -1613,7 +1613,7 @@ impl Instrument {
 
         // Prepare the high end (current is read from there); this probably needs to
         // be done once
-        self._amp_prep(Some(&highs))?;
+        self.amp_prep(Some(&highs))?;
         let mut channelstates = ChannelConf::new_with_state(ChannelState::Maintain);
         let mut adcmask = ChanMask::new();
         for c in highs {
@@ -1871,7 +1871,7 @@ impl Instrument {
     /// `high_speed` argument is true then the DACs will be setup for high-speed pulsing as
     /// required by the High Speed drivers. No delays are introduced here as this will be handled
     /// either by a standard Delay instruction or a High Speed timer.
-    fn _setup_dacs_2t_pulsing(&mut self, config: &[(usize, usize, f32)], high_speed: bool, differential: bool)
+    pub(crate) fn setup_dacs_2t_pulsing(&mut self, config: &[(usize, usize, f32)], high_speed: bool, differential: bool)
         -> Result<(), ArC2Error> {
 
         // (idx, low, high); as required by SetDAC::from_channels().
@@ -1945,12 +1945,12 @@ impl Instrument {
         bias_conf.set(high, ChannelState::VoltArb);
         bias_conf.set(low, ChannelState::VoltArb);
 
-        self._amp_prep(Some(&[low, high]))?;
+        self.amp_prep(Some(&[low, high]))?;
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
         self.process(conf.compile())?;
 
         // setup a non-high speed differential pulsing scheme
-        self._setup_dacs_2t_pulsing(&[(low, high, voltage)], false, true)?;
+        self.setup_dacs_2t_pulsing(&[(low, high, voltage)], false, true)?;
         self.add_delay(nanos+30_000u128)?;
 
         Ok(self)
@@ -2006,7 +2006,7 @@ impl Instrument {
         // was -> self._tia_state = TIAState::Open(ChanMask::all());
         self._tia_state.set_channels_enabled(&[low, high], true);
         // setup a high-speed differential pulsing scheme
-        self._setup_dacs_2t_pulsing(&[(low, high, voltage)], true, true)?;
+        self.setup_dacs_2t_pulsing(&[(low, high, voltage)], true, true)?;
         self.add_delay(30_000u128)?;
         // HS configuration
         self.process(hsconf.compile())?;
@@ -2051,15 +2051,15 @@ impl Instrument {
         }
 
         let mut conf = UpdateChannel::from_regs_default_source(&bias_conf);
-        //self._amp_prep(Some(&chans_to_prep))?;
+        //self.amp_prep(Some(&chans_to_prep))?;
         // this also needs to AMP PRP all channels because in slow operation
         // SetDAC::from_channels will set a voltage for the unselected
         // channels (the "base" voltage)
-        self._amp_prep(None)?;
+        self.amp_prep(None)?;
         self.process(conf.compile())?;
 
         // setup a non-high speed differential pulsing scheme
-        self._setup_dacs_2t_pulsing(&channel_pairs, false, true)?;
+        self.setup_dacs_2t_pulsing(&channel_pairs, false, true)?;
         self.add_delay(nanos+30_000u128)?;
 
         Ok(self)
@@ -2151,7 +2151,7 @@ impl Instrument {
         // WARNING! If a non-differential pulse (last argument is `false`)
         // is used instead `timings` for high channels above should be
         // set to 0 ns.
-        self._setup_dacs_2t_pulsing(&channel_pairs, true, true)?;
+        self.setup_dacs_2t_pulsing(&channel_pairs, true, true)?;
         self.add_delay(30_000u128)?;
 
         self.process(hsconf.compile())?;
