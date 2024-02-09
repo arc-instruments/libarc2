@@ -1809,6 +1809,57 @@ macro_rules! make_from_values_impl {
 
             mask
         }
+
+        /// Create a new bitmask with no channels selected
+        pub fn none() -> Self {
+            Self::new()
+        }
+
+        /// Create a new bitmask with all channels selected
+        pub fn all() -> Self {
+            let mut mask = Self::new();
+            mask.set_enabled_all(true);
+
+            mask
+        }
+
+        /// Create a new bitmask with all channels in `chans` selected
+        pub fn from_channels(chans: &[usize]) -> Self {
+            let mut mask = Self::new();
+            for c in chans {
+                mask.set_enabled(*c, true);
+            }
+
+            mask
+        }
+
+        /// Set all the channels from `chans` to the specified state. This
+        /// will add to the existing channels
+        pub fn set_channels_enabled(&mut self, chans: &[usize], enabled: bool) {
+            for c in chans {
+                self.set_enabled(*c, enabled);
+            }
+        }
+
+        /// Get a list of the enabled channels for this mask
+        pub fn channels(&self) -> Vec<usize> {
+
+            let mut res: Vec<usize> = Vec::with_capacity(consts::NCHANS);
+
+            for ch in 0..consts::NCHANS {
+                if self.get_enabled(ch) {
+                    res.push(ch);
+                }
+            }
+
+            res
+
+        }
+
+        /// Check if no channels are selected in this bitmask
+        pub fn is_empty(&self) -> bool {
+            *self == Self::none()
+        }
     }
 }
 
@@ -1897,61 +1948,6 @@ impl U32Mask<wordreg::Wx4> {
 ///
 ///
 pub type ChanMask = U32Mask<wordreg::Wx2>;
-
-impl ChanMask {
-
-    /// Shorthand for [`ChanMask::new()`] (no channels selected)
-    pub fn none() -> Self {
-        Self::new()
-    }
-
-    /// Create a new ChanMask with all channels selected
-    pub fn all() -> Self {
-        let mut mask = Self::new();
-        mask.set_enabled_all(true);
-
-        mask
-    }
-
-    /// Create a new ChanMask with all channels in `chans` selected
-    pub fn from_channels(chans: &[usize]) -> Self {
-        let mut mask = Self::new();
-        for c in chans {
-            mask.set_enabled(*c, true);
-        }
-
-        mask
-    }
-
-    /// Set all the channels from `chans` to the specified state. This
-    /// will add to the existing channels
-    pub fn set_channels_enabled(&mut self, chans: &[usize], enabled: bool) {
-        for c in chans {
-            self.set_enabled(*c, enabled);
-        }
-    }
-
-    /// Get a list of the enabled channels for this mask
-    pub fn channels(&self) -> Vec<usize> {
-
-        let mut res: Vec<usize> = Vec::with_capacity(consts::NCHANS);
-
-        for ch in 0..consts::NCHANS {
-            if self.get_enabled(ch) {
-                res.push(ch);
-            }
-        }
-
-        res
-
-    }
-
-    /// Check if no channels are selected in this ChanMask
-    pub fn is_empty(&self) -> bool {
-        *self == ChanMask::new()
-    }
-
-}
 
 impl BitAnd for &ChanMask {
 
