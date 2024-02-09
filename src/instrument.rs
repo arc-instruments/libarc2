@@ -1263,6 +1263,16 @@ impl Instrument {
 
     }
 
+    /// Set a new selector configuration with the specified selector
+    /// channel bits asserted set to high and the rest set to low.
+    pub fn config_selectors(&mut self, selectors: &[usize]) ->
+        Result<&mut Self, ArC2Error> {
+
+        let mut instr = UpdateSelector::new_from_channels(&selectors)?;
+        self.process(instr.compile())?;
+        Ok(self)
+    }
+
     /// Common read functionality with one low channel and several high channels.
     /// This function is guaranteed never to flush the output.
     fn _read_slice_inner(&mut self, low: usize, highs: &[usize], vread: u16)

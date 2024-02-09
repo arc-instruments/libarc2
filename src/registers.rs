@@ -123,6 +123,9 @@ pub(crate) mod consts {
     pub(super) const NCHANS: usize = 64;
     // 2 bits per channel for range config (upper and lower voltages)
     pub(super) const RANGCONFSIZE: usize = 2;
+
+    // Number of selector circuits available
+    pub(crate) const NSELECTORS: usize = 32;
 }
 
 #[derive(Error, Debug)]
@@ -1986,6 +1989,15 @@ impl BitXor for &ChanMask {
     }
 
 }
+
+/// Selector selection bitmask
+///
+/// A `SelectorMask` is used to select which selector circuits are
+/// enabled. Selectors are essentially exposed as a set of 32
+/// dedicated digital channels. Unlike generic I/O channels selector
+/// circuits are output only.
+pub type SelectorMask = U32Mask<wordreg::Wx1>;
+
 
 /// Register used to construct an appropriate range selection
 /// bitmask for all available DACs on ArC TWO. For differential

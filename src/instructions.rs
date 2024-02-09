@@ -2,6 +2,7 @@
 
 use std::convert::TryInto;
 use std::collections::BTreeMap;
+use crate::registers;
 use crate::registers::ToU32s;
 use crate::registers::Terminate;
 use crate::registers::consts::DACHCLUSTERMAP;
@@ -9,7 +10,7 @@ use crate::registers::{OpCode, Empty, DACMask, DACVoltage, DACVoltageMask};
 use crate::registers::{ChannelConf, SourceConf, ChannelState};
 use crate::registers::{IOEnable, IOMask, ChanMask, Averaging};
 use crate::registers::{Duration50, Address, HSDelay, DACCluster};
-use crate::registers::{ClusterMask, PulseAttrs, AuxDACFn};
+use crate::registers::{ClusterMask, PulseAttrs, AuxDACFn, SelectorMask};
 use num_traits::FromPrimitive;
 use thiserror::Error;
 
@@ -70,6 +71,8 @@ pub enum InstructionError {
     InvalidDACComposition(u16, u16),
     #[error("CREF and CSET must be both set and within 1.5 V of each other")]
     InvalidCREFCSETCombination,
+    #[error("Selected channel is outside the maximum range of {0}")]
+    ChannelRangeError(usize)
 }
 
 
@@ -1326,6 +1329,62 @@ impl HSPulse {
 
 impl Instruction for HSPulse { make_vec_instr_impl!(HSPulse, instrs, "HS PLS"); }
 
+/// Configure selector circuits
+///
+/// This command is used to manage the on-board selector circuits. Unlike the
+/// 32 generic I/Os selector circuits are exclusively output and they are
+/// typically used for managing transistor gates or other EN signals for
+/// ASICs.
+///
+/// Please note that this instruction only flips the outputs between high and
+/// low. Actual voltages for low and high levels should be adjusted by setting
+/// the SELL and SELH voltages respectively through a SetDAC instruction on
+/// the AUX DACs. This is typically done on the top-level through the
+/// [`Instrument::config_aux_channels`][`crate::instrument::Instrument::config_aux_channels()`]
+/// function by setting [`AuxDACFn`][`crate::registers::AuxDACFn`]`.SELL` and
+/// `.SELH`.
+///
+/// ## Instruction layout
+/// ```text
+///        +--------+--------------+
+///        | OpCode | SelectorMask |
+///        +--------+--------------+
+/// Words:     1         1
+/// ```
+pub struct UpdateSelector {
+    instrs: Vec<u32>
+}
+
+impl UpdateSelector {
+
+    /// Create a new selector update instruction with
+    /// the specified selector channel mask.
+    pub fn new(channels: &SelectorMask) -> Self {
+        let mut instr = Self::create();
+        instr.push_register(&OpCode::UpdateSelector);
+        instr.push_register(channels);
+        instr
+    }
+
+    /// Create a new selector update instructions with
+    /// the specified selector channels pulled high.
+    pub fn new_from_channels(chans: &[usize]) -> Result<Self, InstructionError> {
+        let maxchan: usize = registers::consts::NSELECTORS;
+        for c in chans {
+            if *c >= maxchan {
+                return Err(InstructionError::ChannelRangeError(maxchan));
+            }
+        }
+        let mask = SelectorMask::from_channels(&chans);
+        let mut instr = Self::create();
+        instr.push_register(&OpCode::UpdateSelector);
+        instr.push_register(&mask);
+        Ok(instr)
+    }
+
+}
+
+impl Instruction for UpdateSelector { make_vec_instr_impl!(UpdateSelector, instrs, "UP SEL"); }
 
 /// Connect feedback resistors to the op-amps
 ///
