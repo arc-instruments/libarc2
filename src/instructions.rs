@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use crate::registers;
 use crate::registers::ToU32s;
 use crate::registers::Terminate;
-use crate::registers::consts::DACHCLUSTERMAP;
+use crate::registers::consts::{DACHCLUSTERMAP, SELECTORMAP};
 use crate::registers::{OpCode, Empty, DACMask, DACVoltage, DACVoltageMask};
 use crate::registers::{ChannelConf, SourceConf, ChannelState};
 use crate::registers::{IOEnable, IOMask, ChanMask, Averaging};
@@ -1370,12 +1370,16 @@ impl UpdateSelector {
     /// the specified selector channels pulled high.
     pub fn new_from_channels(chans: &[usize]) -> Result<Self, InstructionError> {
         let maxchan: usize = registers::consts::NSELECTORS;
+        let mut actualchans: Vec<usize> = Vec::with_capacity(chans.len());
+
+        // Convert the selector channels to actual selector bits
         for c in chans {
             if *c >= maxchan {
                 return Err(InstructionError::ChannelRangeError(maxchan));
             }
+            actualchans.push(SELECTORMAP[*c]);
         }
-        let mask = SelectorMask::from_channels(&chans);
+        let mask = SelectorMask::from_channels(&actualchans);
         let mut instr = Self::create();
         instr.push_register(&OpCode::UpdateSelector);
         instr.push_register(&mask);

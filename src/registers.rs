@@ -118,6 +118,15 @@ pub(crate) mod consts {
         ClusterMask::CL7,
     ];
 
+    /// Convert selector channels to bitmask bits
+    pub(crate) const SELECTORMAP: [usize; 32] = [
+    // Selector channel and bitmask bit. Ch 0 → bit 4, ch 1 → bit 5 etc
+    //   0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15
+         4,  5,  6,  7,  3,  2,  1,  0, 12, 13, 14, 15, 11, 10,  9,  8,
+    //  16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31
+        16, 17, 18, 19, 23, 22, 21, 20, 24, 25, 26, 27, 31, 30, 29, 28
+    ];
+
     pub(super) const CHANCONFSIZE: usize = 2;
     pub(super) const AUXNCHANS: usize = 16;
     pub(super) const NCHANS: usize = 64;
