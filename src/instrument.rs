@@ -889,6 +889,18 @@ impl Instrument {
 
     }
 
+    /// Force selected channels to desaturate their corresponding TIA.
+    /// This helps avoid transient spikes when transitioning out of
+    /// current reads. Unlike AMP PRP this should not affect TIA
+    /// states.
+    fn desaturate_channels(&mut self, chans: &[usize]) -> Result<&mut Self, ArC2Error> {
+        self.ground_slice_fast(&chans)?;
+        self.connect_to_gnd(&chans)?;
+        self.add_delay(10_000u128)?;
+        self.connect_to_gnd(&[])?;
+        Ok(self)
+    }
+
     /// Set all DACs to ground maintaining current channel state
     pub fn ground_all_fast(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
@@ -1374,7 +1386,7 @@ impl Instrument {
         self.add_delay(1_000u128)?;
 
         if ground {
-            self.ground_slice_fast(&highs)?.execute()?;
+            self.desaturate_channels(&highs)?.execute()?;
         } else {
             self.execute()?;
         }
