@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::{time, thread};
 use std::collections::HashSet;
 use std::sync::{RwLock, Arc, Mutex, atomic};
@@ -2661,7 +2662,10 @@ impl Instrument {
                 }
 
                 if inter_nanos > 0u128 {
-                    self.ground_all_fast()?;
+                    // We know that channel shouldn't exceed u16 size
+                    // so unwraps here are safe
+                    self.config_channels(&[(low.try_into().unwrap(), 0.0),
+                        (high.try_into().unwrap(), 0.0)], None)?;
                 }
 
                 // No reads are required; interpulse wait and loop to
