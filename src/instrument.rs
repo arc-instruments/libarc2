@@ -888,18 +888,6 @@ impl Instrument {
 
     }
 
-    /// Force selected channels to desaturate their corresponding TIA.
-    /// This helps avoid transient spikes when transitioning out of
-    /// current reads. Unlike AMP PRP this should not affect TIA
-    /// states.
-    fn desaturate_channels(&mut self, chans: &[usize]) -> Result<&mut Self, ArC2Error> {
-        self.ground_slice_fast(&chans)?;
-        self.connect_to_gnd(&chans)?;
-        self.add_delay(10_000u128)?;
-        self.connect_to_gnd(&[])?;
-        Ok(self)
-    }
-
     /// Set all DACs to ground maintaining current channel state
     pub fn ground_all_fast(&mut self) -> Result<&mut Self, ArC2Error> {
         self.process(&*RESET_DAC)?;
@@ -1343,6 +1331,12 @@ impl Instrument {
         self.process(currentread.compile())?;
         self.add_delay(1_000u128)?;
 
+        // Similar to `read_slice_open`, need to force an amp prep
+        // on the C READ channels to avoid spikes during range
+        // transitions.
+        let mut amp_prep = AmpPrep::new(&adcmask);
+        self.process(amp_prep.compile())?;
+
         // The read operation has been assembled, return back the readout address.
         Ok(chunk)
     }
@@ -1384,12 +1378,20 @@ impl Instrument {
         self.process(currentread.compile())?;
         self.add_delay(1_000u128)?;
 
+        // At this point we need to force an AMP PRP to avoid
+        // spikes during range transitions. This must be done
+        // irrespective of TIA state, so we won't use the
+        // `Instrument::amp_prep` function but the AMP PRP
+        // instruction directly
+        let mask = ChanMask::from_channels(&highs);
+        let mut amp_prep = AmpPrep::new(&mask);
+        self.process(amp_prep.compile())?;
+        // and optionally also ground the channels
         if ground {
-            self.desaturate_channels(&highs)?.execute()?;
-        } else {
-            self.execute()?;
+            self.ground_slice_fast(&highs)?;
         }
 
+        self.execute()?;
         self.wait();
 
         let res = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Current)?;
