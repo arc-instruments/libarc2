@@ -2325,9 +2325,10 @@ impl Instrument {
         self.process(conf.compile())?;
         // this was probably redundant -> self._tia_state = TIAState::Open(ChanMask::all());
 
+        // SetDAC for channels participating in pulsing, don't touch the other
+        // channels
         let (mut upch, instr_active) = SetDAC::from_channels(&input_active,
-            Some((vidx!(0.0), vidx!(0.0))), &ChannelState::HiSpeed,
-            &ChannelState::Open)?;
+            None, &ChannelState::HiSpeed, &ChannelState::Maintain)?;
 
         self.process(upch.compile())?;
         // this is now done in the main processing loop; see above
