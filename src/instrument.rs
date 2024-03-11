@@ -1385,10 +1385,14 @@ impl Instrument {
         // instruction directly
         let mask = ChanMask::from_channels(&highs);
         let mut amp_prep = AmpPrep::new(&mask);
-        self.process(amp_prep.compile())?;
-        // and optionally also ground the channels
         if ground {
             self.ground_slice_fast(&highs)?;
+            self.connect_to_gnd(&highs)?;
+        }
+        self.process(amp_prep.compile())?;
+        if ground {
+            self.add_delay(100_000u128)?;
+            self.connect_to_gnd(&[])?;
         }
 
         self.execute()?;
