@@ -13,7 +13,7 @@ use bitvec::prelude::*;
 use bitflags::bitflags;
 use num_traits::{ToPrimitive, FromPrimitive};
 use thiserror::Error;
-use std::ops::{BitAnd, BitXor};
+use std::ops::{BitAnd, BitXor, BitOr, Not};
 use std::iter::zip;
 
 mod wordreg {
@@ -1961,6 +1961,23 @@ impl U32Mask<wordreg::Wx4> {
 ///
 pub type ChanMask = U32Mask<wordreg::Wx2>;
 
+impl Not for &ChanMask {
+
+    type Output = ChanMask;
+
+    fn not(self) -> Self::Output {
+        let mut output = ChanMask::new();
+
+        let slice = self.bits.as_bitslice();
+
+        for i in 0..slice.len() {
+            output.set_enabled(consts::NCHANS-1-i, !slice[i]);
+        }
+
+        output
+    }
+}
+
 impl BitAnd for &ChanMask {
 
     type Output = ChanMask;
@@ -1997,6 +2014,22 @@ impl BitXor for &ChanMask {
         output
     }
 
+}
+
+impl BitOr for &ChanMask {
+    type Output = ChanMask;
+
+    fn bitor(self, other: Self) -> Self::Output {
+        let mut output = ChanMask::new();
+
+        let slice = self.bits.as_bitslice();
+        let other = other.bits.as_bitslice();
+
+        for (i, (t, o)) in zip(slice, other).enumerate() {
+            output.set_enabled(consts::NCHANS-1-i, *t | *o);
+        }
+        output
+    }
 }
 
 /// Selector selection bitmask

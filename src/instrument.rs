@@ -340,7 +340,10 @@ pub struct Instrument {
     // A thread has been spawned
     _op_running: Arc<atomic::AtomicBool>,
 
-    _tia_state: ChanMask
+    // State tracking
+    _tia_state: ChanMask,
+    _hard_gnds: ChanMask,
+    _ac_gnds: ChanMask
 }
 
 /// Find available device IDs.
@@ -494,6 +497,8 @@ impl Instrument {
                 _receiver: Arc::new(Mutex::new(receiver)),
                 _op_running: Arc::new(atomic::AtomicBool::new(false)),
                 _tia_state: ChanMask::all(),
+                _hard_gnds: ChanMask::none(),
+                _ac_gnds: ChanMask::none()
 
             }),
             Err(err) => Err(ArC2Error::FPGAError(err))
@@ -829,6 +834,8 @@ impl Instrument {
             chanmask.set_enabled(*c, true);
         }
 
+        self._hard_gnds = chanmask.clone();
+
         let mut instr = ModifyChannel::from_masks(&chanmask, &ChanMask::none(),
             &ChanMask::none());
         self.process(instr.compile())?;
@@ -836,6 +843,36 @@ impl Instrument {
         Ok(self)
 
     }
+
+    /// Connect the selected channels to hard GND. Unlike [`Instrument::connect_to_gnd`]
+    /// this function will not channels not included in the argument.
+    pub fn gnd_add(&mut self, channels: &[usize]) -> Result<&mut Self, ArC2Error> {
+
+        let chanmask = ChanMask::from_channels(channels);
+        let actual_mask = &chanmask | &self._hard_gnds;
+
+        // Only issue the instruction if channel not already grounded
+        if actual_mask != self._hard_gnds {
+            self.connect_to_gnd(&actual_mask.channels())?;
+        }
+
+        Ok(self)
+    }
+
+    /// Disconnect the selected channelf from hard GND. Unlike [`Instrument::connect_to_gnd`]
+    /// this function will not touch channels not included in the argument.
+    pub fn gnd_remove(&mut self, channels: &[usize]) -> Result<&mut Self, ArC2Error> {
+        let chanmask = ChanMask::from_channels(channels);
+        let inverse = !&chanmask;
+        let actual_mask = &self._hard_gnds & &inverse;
+
+        if actual_mask != self._hard_gnds {
+            self.connect_to_gnd(&actual_mask.channels())?;
+        }
+
+        Ok(self)
+    }
+
 
     /// Modify previously configured channels by switching them to a capacitor backed ground.
     /// Use an empty channel list to release. This will clear any other ground/floating
@@ -847,12 +884,44 @@ impl Instrument {
             chanmask.set_enabled(*c, true);
         }
 
+        self._ac_gnds = chanmask.clone();
+
         let mut instr = ModifyChannel::from_masks(&ChanMask::none(), &chanmask,
             &ChanMask::none());
         self.process(instr.compile())?;
 
         Ok(self)
 
+    }
+
+
+    /// Connect the selected channels to AC GND. Unlike [`Instrument::connect_to_ac_gnd`]
+    /// this function will not channels not included in the argument.
+    pub fn gnd_ac_add(&mut self, channels: &[usize]) -> Result<&mut Self, ArC2Error> {
+
+        let chanmask = ChanMask::from_channels(channels);
+        let actual_mask = &chanmask | &self._ac_gnds;
+
+        // Only issue the instruction if channel not already grounded
+        if actual_mask != self._ac_gnds {
+            self.connect_to_ac_gnd(&actual_mask.channels())?;
+        }
+
+        Ok(self)
+    }
+
+    /// Disconnect the selected channelf from AC GND. Unlike [`Instrument::connect_to_ac_gnd`]
+    /// this function will not touch channels not included in the argument.
+    pub fn gnd_ac_remove(&mut self, channels: &[usize]) -> Result<&mut Self, ArC2Error> {
+        let chanmask = ChanMask::from_channels(channels);
+        let inverse = !&chanmask;
+        let actual_mask = &self._ac_gnds & &inverse;
+
+        if actual_mask != self._ac_gnds {
+            self.connect_to_ac_gnd(&actual_mask.channels())?;
+        }
+
+        Ok(self)
     }
 
     /// Prepare the DACs for transition to VoltArb or CurrentRead
