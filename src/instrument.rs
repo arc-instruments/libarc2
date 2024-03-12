@@ -2863,7 +2863,7 @@ impl Instrument {
             let mut chunk = chunk_opt.unwrap();
 
             #[cfg(feature="flag_addresses")]
-            self.wait_for_flag(&chunk);
+            self.wait_for_flag(&chunk)?;
 
             match self.read_chunk(&mut chunk, &mode, &rtype) {
                 Ok(v) => {
