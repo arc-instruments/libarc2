@@ -825,8 +825,8 @@ impl Instrument {
     }
 
     /// Modify previously configured channels by switching them to ground. Use an
-    /// empty channel list to release. This will clear any other ground/floating
-    /// instructions, for instance one issued with [`Instrument::connect_to_ac_gnd()`].
+    /// empty channel list to release. This will clear any other hard ground/floating
+    /// instructions, but will maintain the state of AC grounds.
     pub fn connect_to_gnd(&mut self, channels: &[usize]) -> Result<&mut Self, ArC2Error> {
 
         let mut chanmask = ChanMask::new();
@@ -836,7 +836,7 @@ impl Instrument {
 
         self._hard_gnds = chanmask.clone();
 
-        let mut instr = ModifyChannel::from_masks(&chanmask, &ChanMask::none(),
+        let mut instr = ModifyChannel::from_masks(&chanmask, &self._ac_gnds,
             &ChanMask::none());
         self.process(instr.compile())?;
 
@@ -875,8 +875,8 @@ impl Instrument {
 
 
     /// Modify previously configured channels by switching them to a capacitor backed ground.
-    /// Use an empty channel list to release. This will clear any other ground/floating
-    /// instructions, for instance one issued with [`Instrument::connect_to_gnd()`].
+    /// Use an empty channel list to release. This will clear any previous AC ground/floating
+    /// instructions but will maintain the existing state of the hard grounds.
     pub fn connect_to_ac_gnd(&mut self, channels: &[usize]) -> Result<&mut Self, ArC2Error> {
 
         let mut chanmask = ChanMask::new();
@@ -886,7 +886,7 @@ impl Instrument {
 
         self._ac_gnds = chanmask.clone();
 
-        let mut instr = ModifyChannel::from_masks(&ChanMask::none(), &chanmask,
+        let mut instr = ModifyChannel::from_masks(&self._hard_gnds, &chanmask,
             &ChanMask::none());
         self.process(instr.compile())?;
 
