@@ -947,13 +947,13 @@ impl Instrument {
             // was -> self.ground_all_fast()?;
             self.ground_slice_fast(&common.channels())?;
             // was -> self.connect_to_gnd(&ALL_CHANS)?;
-            self.connect_to_gnd(&common.channels())?;
+            self.gnd_add(&common.channels())?;
 
             // AMP PRP
             self.process(amp_prep.compile())?;
             self.add_delay(100_000u128)?;
             // and disconnect GND before moving on
-            self.connect_to_gnd(&[])
+            self.gnd_remove(&common.channels())
 
     }
 
@@ -1456,12 +1456,12 @@ impl Instrument {
         let mut amp_prep = AmpPrep::new(&mask);
         if ground {
             self.ground_slice_fast(&highs)?;
-            self.connect_to_gnd(&highs)?;
+            self.gnd_add(&highs)?;
         }
         self.process(amp_prep.compile())?;
         if ground {
             self.add_delay(100_000u128)?;
-            self.connect_to_gnd(&[])?;
+            self.gnd_remove(&highs)?;
         }
 
         self.execute()?;
