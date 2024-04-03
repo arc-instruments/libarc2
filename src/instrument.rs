@@ -1410,11 +1410,14 @@ impl Instrument {
         Ok(chunk)
     }
 
-    /// Do an open current measurement along the specified channels. No channel setup is
-    /// done before the actual current measurement. If required this should be done with
-    /// [`Instrument::config_channels`]. Setting `ground` to `true` will ground the channels
-    /// after the measurement has gone through.
-    pub fn read_slice_open(&mut self, highs: &[usize], ground: bool) -> Result<Vec<f32>, ArC2Error> {
+    // This is for backwards compatibility with the old behaviour or [`Instrument::read_slice_open`]
+    // where the value of the measurement was immediately picked using the raw address of the chuck.
+    // Deferred reads, instead, only add the chunk to the output buffer which preserves the
+    // sequence of commands issues to ArC TWO. While this is techincally corrent, it is
+    // incompatible with how the old [`Instrument::read_slice_open`] worked. In order to maintain
+    // this original behaviour this compatibility function will return the memory chunk associated
+    // with the read-out.
+    fn _read_slice_open_deferred_chunk(&mut self, highs: &[usize], ground: bool) -> Result<Chunk, ArC2Error> {
 
         self.amp_prep(Some(&highs))?;
 
@@ -1434,7 +1437,7 @@ impl Instrument {
             adcmask.set_enabled(*chan, true);
         }
 
-        let mut chunk = self.make_chunk()?;
+        let chunk = self.make_chunk()?;
 
         #[cfg(feature="zero_before_write")]
         match self._zero_chunk(&chunk) {
@@ -1464,11 +1467,37 @@ impl Instrument {
             self.gnd_remove(&highs)?;
         }
 
-        self.execute()?;
-        self.wait();
+        Ok(chunk)
+    }
+
+    /// Do an open current measurement along the specified channels. No channel setup is
+    /// done before the actual current measurement. If required this should be done with
+    /// [`Instrument::config_channels`]. Setting `ground` to `true` will ground the channels
+    /// after the measurement has gone through. This function is meant to be used in a
+    /// chain of commands and will not immediately execute the FIFO buffer and preserves
+    /// the sequence of instructions already issued. Use [`Instrument::read_slice_open`]
+    /// to immediately get a measurement bypassing the command queue.
+    pub fn read_slice_open_deferred(&mut self, highs: &[usize], ground: bool) -> Result<&mut Self, ArC2Error> {
+
+        let chunk = self._read_slice_open_deferred_chunk(highs, ground)?;
+        self._sender.send(Some(chunk))?;
+        Ok(self)
+
+    }
+
+    /// Do an open current measurement along the specified channels. No channel setup is
+    /// done before the actual current measurement. If required this should be done with
+    /// [`Instrument::config_channels`]. Setting `ground` to `true` will ground the channels
+    /// after the measurement has gone through. This will flush the internal command buffer
+    /// executing queued instructions and returning a measurement immediately bypassing
+    /// whatever instruction are queued before so use with caution. Use
+    /// [`Instrument::read_slice_open_deferred`] to add a measurement to the output buffer
+    /// to instead preserve the sequence of operations.
+    pub fn read_slice_open(&mut self, highs: &[usize], ground: bool) -> Result<Vec<f32>, ArC2Error> {
+        let mut chunk = self._read_slice_open_deferred_chunk(highs, ground)?;
+        self.execute()?.wait();
 
         let res = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Current)?;
-
         Ok(res)
     }
 
