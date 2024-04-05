@@ -1199,6 +1199,12 @@ impl Instrument {
             self._tia_state.set_enabled(*ch, true);
         }
 
+        // UP CH will implicitly clear the grounds on the
+        // open channels so we preempt that to force the
+        // ground tracking to update
+        self.gnd_remove(&input)?;
+        self.gnd_ac_remove(&input)?;
+
         let mut upch = UpdateChannel::from_regs_default_source(&chanconf);
         self.process(upch.compile())?;
 
