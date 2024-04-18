@@ -1659,34 +1659,39 @@ impl Instrument {
 
     }
 
-
-    /// Do a voltage read on all the selected channels
-    ///
-    /// This function will read the voltage on all specified channels and return their
-    /// values in ascending channel order. Set `avg` to `true` to enable averaging
-    /// but that will increase readout time from 10 to 320 μs
-    pub fn vread_channels(&mut self, uchans: &[usize], avg: bool) -> Result<Vec<f32>, ArC2Error> {
-
-        // first sort the channels
-        let mut chans = uchans.to_vec();
-        chans.sort();
+    fn _vread_channels_deferred_chunk(&mut self, chans: &[usize], avg: bool) -> Result<Chunk, ArC2Error> {
 
         // Create a new mask and populate it with the specified channels
         let mut mask = ChanMask::none();
-        for c in &chans {
+
+        for c in chans {
             mask.set_enabled(*c, true);
         }
 
-        let mut chunk = self.make_chunk()?;
-
-        let mut results: Vec<f32> = Vec::with_capacity(chans.len());
+        let chunk = self.make_chunk()?;
 
         let mut voltageread = VoltageRead::new(&mask, avg, chunk.addr(),
             chunk.flag_addr(), VALUEAVAILFLAG);
         self.process(voltageread.compile())?;
 
+        Ok(chunk)
+
+    }
+
+    /// Do a voltage read on all the specified channels.
+    /// This function will read the voltage on all specified channels and return their
+    /// values in ascending channel order. Set `avg` to `true` to enable averaging
+    /// but that will increase readout time from 10 to 320 μs. Calling this function
+    /// will immediately flush the FIFO and return the value.
+    pub fn vread_channels(&mut self, uchans: &[usize], avg: bool) -> Result<Vec<f32>, ArC2Error> {
+
+        let mut chans = uchans.to_vec();
+        chans.sort();
+
+        let mut chunk = self._vread_channels_deferred_chunk(&chans, avg)?;
         self.execute()?;
         self.wait();
+        let mut results: Vec<f32> = Vec::with_capacity(chans.len());
 
         let res = self.read_chunk(&mut chunk, &DataMode::All, &ReadType::Voltage)?;
 
@@ -1695,6 +1700,23 @@ impl Instrument {
         }
 
         Ok(results)
+
+    }
+
+    /// Do a voltage read on the specified channels. Unlike [`Instrument::vread_channels`]
+    /// execution of this command is deferred, which means that it needs to be followed
+    /// by an [`Instrument::execute`] call (at some point). As the equivalent current
+    /// function this is meant to be used in a chain of commands without immediately
+    /// flushing the FIFO. If you want to bypass the command queue and get an immediate
+    /// voltage read use [`Instrument::vread_channels`] instead.
+    pub fn vread_channels_deferred(&mut self, uchans: &[usize], avg: bool) -> Result<&mut Self, ArC2Error> {
+
+        let mut chans = uchans.to_vec();
+        chans.sort();
+
+        let chunk = self._vread_channels_deferred_chunk(&chans, avg)?;
+        self._sender.send(Some(chunk))?;
+        Ok(self)
 
     }
 
