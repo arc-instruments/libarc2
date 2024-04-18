@@ -2307,7 +2307,18 @@ mod iomask_tests {
 
 }
 
+/// IO Direction for logic instructions. This is typically used to
+/// set the direction of the 4 GPIO clusters (4×8 channels). There
+/// are obviously only two options.
+#[derive(PartialEq, Copy, Clone)]
+pub struct IODir(bool);
 
+impl IODir {
+    /// Set IO cluster as input
+    pub const IN: IODir = Self(false);
+    /// Set IO cluster as output
+    pub const OUT: IODir = Self(true);
+}
 
 /// IO enable configuration register.
 ///
@@ -2359,20 +2370,37 @@ impl IOEnable {
 
     /// Create a new `IOEnable` with all IOs enabled and set to output
     pub fn all_output() -> IOEnable {
-        let vec: BitVec<u32, Lsb0> = BitVec::repeat(false, Self::LEN);
-        let mut io = IOEnable { bits: vec };
-        io.set_en(true);
-        io.set_all_outputs(true);
-
-        io
+        Self::with_iodirs(IODir::OUT, IODir::OUT, IODir::OUT, IODir::OUT)
     }
 
     /// Create a new `IOEnable` with all IOs enabled and set to input
     pub fn all_input() -> IOEnable {
+        Self::with_iodirs(IODir::IN, IODir::IN, IODir::IN, IODir::IN)
+    }
+
+    /// Create a new `IOEnable` with the IO clusters set at the specified
+    /// directions. Each cluster represents a contiguous block of 8 GPIOs.
+    /// Cluster 0: 0–7, Cluster 1: 8–15, Cluster 2: 16-23, Cluster 4: 24–32.
+    pub fn with_iodirs(cl0: IODir, cl1: IODir, cl2: IODir, cl3: IODir) -> IOEnable {
         let vec: BitVec<u32, Lsb0> = BitVec::repeat(false, Self::LEN);
         let mut io = IOEnable { bits: vec };
         io.set_en(true);
-        io.set_all_outputs(false);
+
+        if cl0 == IODir::OUT {
+            io.set_output(0, true);
+        }
+
+        if cl1 == IODir::OUT {
+            io.set_output(1, true);
+        }
+
+        if cl2 == IODir::OUT {
+            io.set_output(2, true);
+        }
+
+        if cl3 == IODir::OUT {
+            io.set_output(3, true);
+        }
 
         io
     }

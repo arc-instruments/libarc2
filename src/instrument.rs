@@ -12,7 +12,7 @@ use spin_sleep;
 use crate::instructions::*;
 use crate::registers::{ChannelState, ChanMask, IOMask};
 use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
-use crate::registers::{IOEnable, AuxDACFn};
+use crate::registers::{IOEnable, IODir, AuxDACFn};
 use crate::registers::consts::HSCLUSTERMAP;
 use crate::memory::{MemMan, Chunk, MemoryError};
 
@@ -2691,12 +2691,12 @@ impl Instrument {
         Ok(self)
     }
 
-    /// Configures the digital I/Os to the specified levels. The I/Os can only be
-    /// configured as outputs for now, so the bitmask essentially switches the
-    /// digital outputs as low/high.
-    pub fn set_logic(&mut self, mask: &IOMask) -> Result<&mut Self, ArC2Error> {
+    /// Configure the digital GPIOs to the specified levels and direction.
+    /// GPIO direction can only be set on a per-cluster level (0–7, 8–15,
+    /// 16–23, 24–32).
+    pub fn set_logic(&mut self, cl0: IODir, cl1: IODir, cl2: IODir, cl3: IODir, mask: &IOMask) -> Result<&mut Self, ArC2Error> {
 
-        let mut instr = UpdateLogic::with_mask(&mask);
+        let mut instr = UpdateLogic::with_directions(cl0, cl1, cl2, cl3, &mask);
         self.process(instr.compile())?;
 
         Ok(self)

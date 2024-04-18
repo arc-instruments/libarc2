@@ -8,7 +8,7 @@ use crate::registers::Terminate;
 use crate::registers::consts::{DACHCLUSTERMAP, SELECTORMAP};
 use crate::registers::{OpCode, Empty, DACMask, DACVoltage, DACVoltageMask};
 use crate::registers::{ChannelConf, SourceConf, ChannelState};
-use crate::registers::{IOEnable, IOMask, ChanMask, Averaging};
+use crate::registers::{IOEnable, IOMask, IODir, ChanMask, Averaging};
 use crate::registers::{Duration50, Address, HSDelay, DACCluster};
 use crate::registers::{ClusterMask, PulseAttrs, AuxDACFn, SelectorMask};
 use num_traits::FromPrimitive;
@@ -1037,6 +1037,14 @@ impl UpdateLogic {
         let mut ioenable = IOEnable::new();
         ioenable.set_en(true);
 
+        Self::with_regs(&mask, &ioenable)
+    }
+
+    /// Create a new IO instruction on selected channels with specified
+    /// cluster directions. Each cluster represents a block of contiguous
+    /// GPIOs. Only channels defined in the GPIO mask will be affected.
+    pub fn with_directions(cl0: IODir, cl1: IODir, cl2: IODir, cl3: IODir, mask: &IOMask) -> Self {
+        let ioenable = IOEnable::with_iodirs(cl0, cl1, cl2, cl3);
         Self::with_regs(&mask, &ioenable)
     }
 }
