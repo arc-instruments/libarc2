@@ -118,7 +118,7 @@ pub trait Instruction {
     /// use libarc2::{Instrument};
     /// use libarc2::instructions::{ResetDAC, Instruction};
     ///
-    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true, true).unwrap();
     ///
     /// let mut reset = ResetDAC::new();
     /// arc2.process(reset.compile());

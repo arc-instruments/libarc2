@@ -62,7 +62,7 @@ mod hardware {
             }
         };
 
-        let _device = libarc2::Instrument::open_with_fw(0i32, &path, false).unwrap();
+        let _device = libarc2::Instrument::open_with_fw(0i32, &path, false, true).unwrap();
 
     }
 

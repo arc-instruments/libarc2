@@ -518,15 +518,20 @@ impl Instrument {
 
     /// Open a new Instrument with a specified id and bitstream.
     /// This essentially combines [`Instrument::open()`] and
-    /// [`Instrument::load_firmware()`].
-    pub fn open_with_fw(id: i32, path: &str, retained_mode: bool) -> Result<Instrument, ArC2Error> {
+    /// [`Instrument::load_firmware()`]. If `init` is true
+    /// additional instructions will be issued to initialise
+    /// ArC TWO to a known state (3.3V logic and all DACs at 0.0 V).
+    pub fn open_with_fw(id: i32, path: &str, retained_mode: bool, init: bool) -> Result<Instrument, ArC2Error> {
         let mut instr = Instrument::open(id, retained_mode)?;
         instr.load_firmware(&path)?;
-        instr.process(&*RESET_DAC)?;
-        instr.process(&*SET_3V3_LOGIC)?;
-        instr.process(&*UPDATE_DAC)?;
-        instr.add_delay(30_000u128)?;
-        instr.execute()?;
+        spin_sleep::sleep(time::Duration::from_millis(100));
+        if init {
+            instr.process(&*RESET_DAC)?;
+            instr.process(&*SET_3V3_LOGIC)?;
+            instr.process(&*UPDATE_DAC)?;
+            instr.add_delay(30_000u128)?;
+            instr.execute()?;
+        }
 
         Ok(instr)
     }
@@ -1176,7 +1181,7 @@ impl Instrument {
     ///
     /// # fn main() -> Result<(), ArC2Error> {
     ///
-    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true, true).unwrap();
     ///
     /// // This will float all channels then bias only the selected ones, in this case
     /// // channels 7 and 19 at 2.0 and 1.5 volts respectively
@@ -1223,7 +1228,7 @@ impl Instrument {
     /// # use libarc2::ArC2Error;
     ///
     /// # fn main() -> Result<(), ArC2Error> {
-    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true, true).unwrap();
     ///
     /// let input: Vec<(u16, f32)> = vec![(7, 1.0), (8, 1.5), (9, 2.0)];
     /// // Setup channels 7, 8 and 9, set others to 0.0 V
@@ -1240,7 +1245,7 @@ impl Instrument {
     /// # use libarc2::ArC2Error;
     ///
     /// # fn main() -> Result<(), ArC2Error> {
-    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true, true).unwrap();
     /// let all_chans = (0..64).collect::<Vec<usize>>();
     ///
     /// let input: Vec<(u16, f32)> = vec![(7, 1.0), (8, 1.5), (9, 2.0)];
@@ -1260,7 +1265,7 @@ impl Instrument {
     /// # use libarc2::ArC2Error;
     ///
     /// # fn main() -> Result<(), ArC2Error> {
-    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true).unwrap();
+    /// let mut arc2 = Instrument::open_with_fw(0, "fw.bin", true, true).unwrap();
     /// let all_chans = (0..64).collect::<Vec<usize>>();
     ///
     /// let input: Vec<(u16, f32)> = vec![(7, 1.0), (8, 1.5), (9, 2.0)];
