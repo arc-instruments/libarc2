@@ -1360,9 +1360,14 @@ impl Instrument {
 
         let zero: u16 = vidx!(0.0);
 
-        // generate a list of dac settings, only one channel in this case
-        let (mut upch, setdacs) = SetDAC::from_channels(&[(low as u16, vread, vread)],
-            Some((zero, zero)), &ChannelState::VoltArb, &ChannelState::Maintain)?;
+        // generate a list of dac settings
+        let mut actives: Vec<(u16, u16, u16)> = Vec::new();
+        actives.push((low as u16, vread, vread));
+        for high in highs {
+            actives.push((*high as u16, zero, zero));
+        }
+        let (mut upch, setdacs) = SetDAC::from_channels(&actives,
+            None, &ChannelState::VoltArb, &ChannelState::Maintain)?;
 
         // Is this necessary here?
         // Yes it is necessary, as the UP CH following this will transition
@@ -2075,10 +2080,10 @@ impl Instrument {
 
         let (mut upch, instrs) = if high_speed {
             SetDAC::from_channels(&channels, Some((vidx!(0.0), vidx!(0.0))),
-                &ChannelState::HiSpeed, &ChannelState::Open)?
+                &ChannelState::HiSpeed, &ChannelState::Maintain)?
         } else {
             SetDAC::from_channels(&channels, Some((vidx!(0.0), vidx!(0.0))),
-                &ChannelState::VoltArb, &ChannelState::Open)?
+                &ChannelState::VoltArb, &ChannelState::Maintain)?
         };
         self.process(upch.compile())?;
 
