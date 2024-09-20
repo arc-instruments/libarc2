@@ -323,33 +323,24 @@ impl SetDAC {
         Ok(instr)
     }
 
-    /// Create a new logic instruction
-    ///
-    /// This instruction operates on the AUX1 DAC which is used
-    /// to set the logic level for the board. This function will
-    /// return an instruction suitable for 3.3V logic;
-    pub fn new_3v3_logic() -> Self {
-        let mut instr = SetDAC::create();
-        instr.push_register(&OpCode::SetDAC);
-        instr.push_register(&DACMask::AUX1);
-        instr.push_register(&Empty::new());
-        instr.push_register(&DACVoltageMask::ALL);
+    pub(crate) fn new_logic(level: f32) -> (DACRange, Self) {
 
-        let mut voltages = DACVoltage::new();
-        voltages.set_upper(0, 0x0000);
-        voltages.set_lower(0, 0x0000);
+        // 3.81 * 2.62 = 9.98 V - need to switch to higher
+        // range for higher voltage levels
+        let range = if level > 3.81 {
+            OutputRange::EXT
+        } else {
+            OutputRange::STD
+        };
 
-        // Voltage will be divided by 2.62 internally to get
-        // the actual voltage: 8.646/2.62 = 3.3.
-        voltages.set_upper(1, vidx!(8.646));
-        voltages.set_lower(1, 0x0000);
-        voltages.set_upper(2, 0x0000);
-        voltages.set_lower(2, 0x0000);
-        voltages.set_upper(3, 0x0000);
-        voltages.set_lower(3, 0x0000);
-        instr.push_register(&voltages);
-
-        instr
+        let mask = ArbMask::from_aux_channels(&[AuxDACFn::LGC]);
+        let dacrange = DACRange::aux_chans_at_range(&mask, &range);
+        let setdac = if range == OutputRange::STD {
+            SetDAC::for_logic(level*2.62)
+        } else {
+            SetDAC::for_logic(level*1.31)
+        };
+        (dacrange, setdac)
     }
 
     /// Create a new instruction with specified registers
@@ -1695,25 +1686,6 @@ mod tests {
               0xFF, 0xFF, 0x00, 0x90,
               0x00, 0x80, 0x00, 0x80]);
 
-    }
-
-    #[test]
-    fn new_set_dac_3v3_logic() {
-        let mut instr = SetDAC::new_3v3_logic();
-
-        assert_eq!(instr.compile().view(), &[0x1, 0x20000, 0x0, 0xf, 0x0,
-            0xeeab0000, 0x0, 0x0, 0x80008000]);
-
-        assert_eq!(instr.to_bytevec(),
-            &[0x01, 0x00, 0x00, 0x00,
-              0x00, 0x00, 0x02, 0x00,
-              0x00, 0x00, 0x00, 0x00,
-              0x0f, 0x00, 0x00, 0x00,
-              0x00, 0x00, 0x00, 0x00,
-              0x00, 0x00, 0xab, 0xee,
-              0x00, 0x00, 0x00, 0x00,
-              0x00, 0x00, 0x00, 0x00,
-              0x00, 0x80, 0x00, 0x80]);
     }
 
     #[test]

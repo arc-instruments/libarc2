@@ -45,12 +45,6 @@ lazy_static! {
         instr
     };
 
-    pub(crate) static ref SET_3V3_LOGIC: SetDAC = {
-        let mut instr = SetDAC::new_3v3_logic();
-        instr.compile();
-        instr
-    };
-
     static ref CHAN_FLOAT_ALL: UpdateChannel = {
         let chanconf = ChannelConf::new_with_state(ChannelState::Open);
         let mut instr = UpdateChannel::from_regs_default_source(&chanconf);
@@ -544,9 +538,7 @@ impl Instrument {
         spin_sleep::sleep(time::Duration::from_millis(100));
         if init {
             instr.process(&*RESET_DAC)?;
-            instr.process(&*SET_3V3_LOGIC)?;
-            instr.process(&*UPDATE_DAC)?;
-            instr.add_delay(30_000u128)?;
+            instr.set_logic_level(LogicLevel::LL3V3)?;
             instr.execute()?;
         }
 
@@ -795,6 +787,40 @@ impl Instrument {
 
     }
 
+    /// Set the IO logic level to the defined [`LogicLevel`][`crate::instrument::LogicLevel`].
+    /// Note that setting the logic will reset the level shifters  if connected to (IO0).
+    pub fn set_logic_level(&mut self, level: LogicLevel) -> Result<&mut Self, ArC2Error> {
+
+        let iomask = IOMask::all();
+        let mut en = IOEnable::new();
+        en.set_en(false);
+        let mut uplgc = UpdateLogic::with_regs(&iomask, &en);
+        self.process(uplgc.compile())?;
+
+        let (mut dacrange, mut setdac) = SetDAC::new_logic(level.into());
+
+        // 1.8 and 3.3 V puts the DACs in STD range so do that
+        // before setting the voltages
+        if level == LogicLevel::LL1V8 || level == LogicLevel::LL3V3 {
+            self.process(dacrange.compile())?;
+            self.add_delay(2_500u128)?;
+        }
+
+        self.process(setdac.compile())?;
+        self.process(&*UPDATE_DAC)?;
+        self.add_delay(6_500u128)?;
+
+        // 5 V will put the DACs in EXT range so switch the range
+        // after setting the voltages.
+        if level == LogicLevel::LL5V {
+            self.process(dacrange.compile())?;
+        }
+
+        self.add_delay(30_000u128)?;
+
+        Ok(self)
+    }
+
     /// Sets the voltage range for the selected channels to either ±10 V (standard) or
     /// ± 20 V (extended) depending on the variant of
     /// [`OuputRange`][`crate::registers::OutputRange`] provided.
@@ -1031,12 +1057,6 @@ impl Instrument {
         self.add_delay(30_000u128)?;
 
         Ok(self)
-    }
-
-    /// Set global 3.3 V logic level
-    pub fn set_3v3_logic(&mut self) -> Result<&mut Self, ArC2Error> {
-        self.process(&*SET_3V3_LOGIC)?;
-        self.load_dacs()
     }
 
     /// Update the DAC configuration
