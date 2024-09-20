@@ -10,8 +10,8 @@ use thiserror::Error;
 use spin_sleep;
 
 use crate::instructions::*;
-use crate::registers::{ChannelState, ChanMask, IOMask};
-use crate::registers::{ChannelConf, PulseAttrs, ClusterMask};
+use crate::registers::{ChanMask, ChannelState, IOMask, OutputRange};
+use crate::registers::{ChannelConf, PulseAttrs, ClusterMask, ArbMask};
 use crate::registers::{IOEnable, IODir, AuxDACFn};
 use crate::registers::consts::HSCLUSTERMAP;
 use crate::memory::{MemMan, Chunk, MemoryError};
@@ -304,6 +304,23 @@ impl WaitFor {
     /// This will panic if used with on an improper variant.
     pub fn iterations(self) -> usize {
         if let WaitFor::Iterations(i) = self { i } else { panic!("No Iterations variant") }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum LogicLevel {
+    LL1V8,
+    LL3V3,
+    LL5V
+}
+
+impl Into<f32> for LogicLevel {
+    fn into(self) -> f32 {
+        match self {
+            LogicLevel::LL1V8 => 1.8,
+            LogicLevel::LL3V3 => 3.3,
+            LogicLevel::LL5V => 5.0
+        }
     }
 }
 
@@ -776,6 +793,28 @@ impl Instrument {
             Err(err) => Err(ArC2Error::FPGAError(err))
         }
 
+    }
+
+    /// Sets the voltage range for the selected channels to either ±10 V (standard) or
+    /// ± 20 V (extended) depending on the variant of
+    /// [`OuputRange`][`crate::registers::OutputRange`] provided.
+    pub fn set_channel_range(&mut self, chans: &[usize], range: &OutputRange) -> Result<&mut Self, ArC2Error> {
+        let mask = ChanMask::from_channels(&chans);
+        let mut dacrange = DACRange::chans_at_range(&mask, range);
+        self.process(dacrange.compile())?;
+
+        Ok(self)
+    }
+
+    /// Sets the voltage range for the selected auxiliary channels to either ±10 V (standard)
+    /// or ± 20 V (extended) depending on the variant of
+    /// [`OuputRange`][`crate::registers::OutputRange`] provided.
+    pub fn set_aux_channel_range(&mut self, chans: &[AuxDACFn], range: &OutputRange) -> Result<&mut Self, ArC2Error> {
+        let mask = ArbMask::from_aux_channels(&chans);
+        let mut dacrange = DACRange::aux_chans_at_range(&mask, range);
+        self.process(dacrange.compile())?;
+
+        Ok(self)
     }
 
     /// Reset all DACs on the tool. This will execute existing buffers.

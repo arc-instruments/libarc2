@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::time::Duration;
+use consts::{AUXFNRNGMAP, LGCRNGIDX};
 use num_derive::{FromPrimitive, ToPrimitive};
 use bitvec::prelude::*;
 use bitflags::bitflags;
@@ -118,6 +119,13 @@ pub(crate) mod consts {
         ClusterMask::CL7,
     ];
 
+    /// Convert between AuxDACFn and index in the ArbMask used for range selection
+    pub(crate) const AUXFNRNGMAP: [usize; 8] = [
+        1, 0, 3, 2, 5, 4, 7, 6
+    ];
+    /// Hardcoded index for the LGC bit position in the range channel mask
+    pub(crate) const LGCRNGIDX: usize = 11;
+
     /// Convert selector channels to bitmask bits
     pub(crate) const SELECTORMAP: [usize; 32] = [
     // Selector channel and bitmask bit. Ch 0 → bit 4, ch 1 → bit 5 etc
@@ -130,8 +138,6 @@ pub(crate) mod consts {
     pub(super) const CHANCONFSIZE: usize = 2;
     pub(super) const AUXNCHANS: usize = 16;
     pub(super) const NCHANS: usize = 64;
-    // 2 bits per channel for range config (upper and lower voltages)
-    pub(super) const RANGCONFSIZE: usize = 2;
 
     // Number of selector circuits available
     pub(crate) const NSELECTORS: usize = 32;
@@ -247,7 +253,6 @@ impl AuxDACFn {
         (*self as usize) % 2 != 0
     }
 }
-
 
 
 /// Output range for the DAC RNG instruction. There are only two options:
@@ -2034,110 +2039,94 @@ impl BitOr for &ChanMask {
     }
 }
 
-/// Selector selection bitmask
+/// Arbitrary DAC Channel configuration bitmask.
 ///
-/// A `SelectorMask` is used to select which selector circuits are
-/// enabled. Selectors are essentially exposed as a set of 32
-/// dedicated digital channels. Unlike generic I/O channels selector
-/// circuits are output only.
-pub type SelectorMask = U32Mask<wordreg::Wx1>;
+/// Similar to [`ChanMask`][`crate::registers::ChanMask`] this is
+/// used to select the channels of arbitrary DACs.
+pub type ArbMask = U32Mask<wordreg::Wx1>;
 
-
-/// Register used to construct an appropriate range selection
-/// bitmask for all available DACs on ArC TWO. For differential
-/// biasing both DAC halves of each individual channel can be
-/// ranged independently.
-///
-/// ## Examples
-/// ```
-/// use libarc2::registers::{RangeMask, OutputRange, AuxDACFn, ToU32s};
-///
-/// // Create a new mask, all channels at standard range
-/// let mut mask = RangeMask::new();
-///
-/// // Set the 8th channel to extended range
-/// mask.set_lower(7usize, OutputRange::EXT);
-///
-/// // Set the SELH Aux function to extended range
-/// mask.set_aux(AuxDACFn::SELH, OutputRange::EXT);
-///
-/// // Set the logic level range to extended
-/// mask.set_logic(OutputRange::EXT);
-///
-/// assert_eq!(mask.as_u32s(), [0x00000801, 0x00000000, 0x00000000,
-///     0x00000000, 0x00004000])
-/// ```
-pub struct RangeMask {
-    bits: BitVec<u32, Msb0>,
-}
-
-impl RangeMask {
-
-    // The virtual channel that corresponds to
-    // the LGC range bit in the AUX1 DAC
-    const LGC_VCHANNEL: usize = 70;
-
-    pub fn new() -> RangeMask {
-
-        // due to the issue LS bits and MS bytes we ensure that the
-        // underlying bytes are full 5 u32s long. The upper 16 bits
-        // will always be empty
-        let size: usize = consts::NCHANS*consts::RANGCONFSIZE + consts::AUXNCHANS;
-        let nbits = std::mem::size_of::<u32>()*8;
-        let words = if size % nbits == 0 {
-            size / nbits
-        } else {
-            size / nbits + 1
-        };
-        let vec: BitVec<u32, Msb0> = BitVec::repeat(false, words*nbits);
-
-        RangeMask { bits: vec }
-    }
-
-    /// Set the range for both upper and lower half of the specified channel
-    pub fn set(&mut self, idx: usize, range: OutputRange) {
-        self.set_upper(idx, range);
-        self.set_lower(idx, range);
-    }
-
-    pub fn set_aux(&mut self, func: AuxDACFn, range: OutputRange) {
-        // 0, 1 → 64 | 2, 3 → 65 | 4, 5 → 66 | 6, 7 → 67
-        // L, U      | L, U      | L, U      | L, U
-
-        // this finds the "virtual" channel idx of the aux fn
-        let aux_chan: usize = consts::NCHANS + (func as usize)/2usize;
-
-        if func.is_lower() {
-            self.set_lower(aux_chan, range);
-        } else {
-            self.set_upper(aux_chan, range);
+impl ArbMask {
+    pub(crate) fn from_aux_channels(chans: &[AuxDACFn]) -> Self {
+        let mut mask = ArbMask::none();
+        for c in chans {
+            // special handling for the Logic range DAC
+            let idx = if *c == AuxDACFn::LGC {
+                LGCRNGIDX
+            } else { AUXFNRNGMAP[*c as usize] };
+            mask.set_enabled(idx, true);
         }
+
+        mask
     }
+}
 
-    pub fn set_logic(&mut self, range: OutputRange) {
-        self.set_upper(Self::LGC_VCHANNEL, range);
-    }
+impl Not for &ArbMask {
+    type Output = ArbMask;
 
-    /// Set the range for the upper half of the specified channel
-    pub fn set_upper(&mut self, idx: usize, range: OutputRange) {
+    fn not(self) -> Self::Output {
+        let mut output = ArbMask::new();
 
-        let actual_idx: usize = self.bits.len() - 1 - idx*consts::RANGCONFSIZE;
-        self.bits.set(actual_idx+1, range.0);
-    }
+        let slice = self.bits.as_bitslice();
 
-    /// Set the range for the lower half of the specified channel
-    pub fn set_lower(&mut self, idx: usize, range: OutputRange) {
+        for i in 0..slice.len() {
+            output.set_enabled(consts::AUXNCHANS-1-i, !slice[i]);
+        }
 
-        let actual_idx: usize = self.bits.len() - 1 - idx*consts::RANGCONFSIZE;
-        self.bits.set(actual_idx, range.0);
+        output
     }
 
 }
 
-impl ToU32s for RangeMask {
-    fn as_u32s(&self) -> Vec<u32> {
-        let bits = self.bits.as_raw_slice();
-        bits.to_vec()
+impl BitAnd for &ArbMask {
+
+    type Output = ArbMask;
+
+    fn bitand(self, other: Self) -> Self::Output {
+        let mut output = ArbMask::new();
+
+        let slice = self.bits.as_bitslice();
+        let other = other.bits.as_bitslice();
+
+        for (i, (t, o)) in zip(slice, other).enumerate() {
+            output.set_enabled(consts::AUXNCHANS-1-i, *t & *o);
+        }
+
+        output
+    }
+
+}
+
+impl BitXor for &ArbMask {
+
+    type Output = ArbMask;
+
+    fn bitxor(self, other: Self) -> Self::Output {
+        let mut output = ArbMask::new();
+
+        let slice = self.bits.as_bitslice();
+        let other = other.bits.as_bitslice();
+
+        for (i, (t, o)) in zip(slice, other).enumerate() {
+            output.set_enabled(consts::AUXNCHANS-1-i, *t ^ *o);
+        }
+        output
+    }
+
+}
+
+impl BitOr for &ArbMask {
+    type Output = ArbMask;
+
+    fn bitor(self, other: Self) -> Self::Output {
+        let mut output = ArbMask::new();
+
+        let slice = self.bits.as_bitslice();
+        let other = other.bits.as_bitslice();
+
+        for (i, (t, o)) in zip(slice, other).enumerate() {
+            output.set_enabled(consts::AUXNCHANS-1-i, *t | *o);
+        }
+        output
     }
 }
 

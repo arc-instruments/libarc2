@@ -3,10 +3,11 @@
 use std::convert::TryInto;
 use std::collections::BTreeMap;
 use crate::registers;
+use crate::registers::OutputRange;
 use crate::registers::ToU32s;
 use crate::registers::Terminate;
 use crate::registers::consts::{DACHCLUSTERMAP, SELECTORMAP};
-use crate::registers::{OpCode, Empty, DACMask, DACVoltage, DACVoltageMask};
+use crate::registers::{OpCode, Empty, DACMask, ArbMask, DACVoltage, DACVoltageMask};
 use crate::registers::{ChannelConf, SourceConf, ChannelState};
 use crate::registers::{IOEnable, IOMask, IODir, ChanMask, Averaging};
 use crate::registers::{Duration50, Address, HSDelay, DACCluster};
@@ -1421,6 +1422,54 @@ impl UpdateSelector {
 }
 
 impl Instruction for UpdateSelector { make_vec_instr_impl!(UpdateSelector, instrs, "UP SEL"); }
+
+pub struct DACRange {
+    instrs: Vec<u32>
+}
+
+impl DACRange {
+
+    pub fn new(en_channels: &ChanMask, rng_channels: &ChanMask, en_aux_channels: &ArbMask, rng_aux_channels: &ArbMask) -> Self {
+        let mut instr = DACRange::create();
+        instr.push_register(&OpCode::DACRange);
+        instr.push_register(en_aux_channels);
+        instr.push_register(en_channels);
+        instr.push_register(rng_aux_channels);
+        instr.push_register(rng_channels);
+
+        instr
+    }
+
+    pub fn new_with_ranges(chans: &ChanMask, rng_chans: &OutputRange, aux_chans: &ArbMask, rng_aux_chans: &OutputRange) -> Self {
+
+        let rng_chans_actual: ChanMask;
+        if *rng_chans == OutputRange::STD {
+            rng_chans_actual = ChanMask::none();
+        } else {
+            rng_chans_actual = ChanMask::all();
+        }
+
+        let rng_aux_chans_actual: ArbMask;
+        if *rng_aux_chans == OutputRange::STD {
+            rng_aux_chans_actual = ArbMask::none();
+        } else {
+            rng_aux_chans_actual = ArbMask::all();
+        }
+
+        DACRange::new(chans, &rng_chans_actual, aux_chans, &rng_aux_chans_actual)
+
+    }
+
+    pub fn chans_at_range(chans: &ChanMask, rng: &OutputRange) -> Self {
+        DACRange::new_with_ranges(chans, rng, &ArbMask::none(), &OutputRange::STD)
+    }
+
+    pub fn aux_chans_at_range(chans: &ArbMask, rng: &OutputRange) -> Self {
+        DACRange::new_with_ranges(&ChanMask::none(), &OutputRange::STD, chans, rng)
+    }
+}
+
+impl Instruction for DACRange { make_vec_instr_impl!(DACRange, instrs, "DAC RNG"); }
 
 /// Connect feedback resistors to the op-amps
 ///
