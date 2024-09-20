@@ -2139,6 +2139,14 @@ impl ToU32s for RangeMask {
     }
 }
 
+/// Selector selection bitmask
+///
+/// A `SelectorMask` is used to select which selector circuits are
+/// enabled. Selectors are essentially exposed as a set of 32
+/// dedicated digital channels. Unlike generic I/O channels selector
+/// circuits are output only.
+pub type SelectorMask = U32Mask<wordreg::Wx1>;
+
 
 /// Averaging for read operations
 #[derive(Clone, Copy, FromPrimitive, ToPrimitive, Debug)]
