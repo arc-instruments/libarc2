@@ -209,7 +209,7 @@ impl ToU32s for OpCode {
 /// function for this operation and it is not done via the
 /// [`Instrument::config_aux_channels`][`crate::instrument::Instrument::config_aux_channels()`]
 /// route.
-#[derive(Clone, Copy, FromPrimitive, ToPrimitive)]
+#[derive(PartialEq, Clone, Copy, FromPrimitive, ToPrimitive)]
 #[repr(usize)]
 pub enum AuxDACFn {
     /// Selector circuit pulls down to this voltage
@@ -234,6 +234,8 @@ pub enum AuxDACFn {
     /// dictates the output current. This should never exceed 1.5 V.
     /// Must be within 1.5 V of CREF.
     CSET = 7,
+    /// Controls the logic level
+    LGC = 10
 }
 
 impl AuxDACFn {

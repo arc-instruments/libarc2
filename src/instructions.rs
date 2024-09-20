@@ -634,13 +634,31 @@ impl SetDAC {
         Ok((UpdateChannel::from_regs_default_source(&chanconf), result))
     }
 
-    /// Set values for the auxiliarry DACs
+    /// Convenience function to generate an LD VOLT instruction for
+    /// the LGC part of the auxiliary DACs. LGC is in a non-continuous
+    /// index with respect to the rest of auxiliary DACs and is also
+    /// on AUX1 instead of AUX0 so it needs special handling.
+    fn for_logic(voltage: f32) -> Self {
+        let mut voltages = DACVoltage::new();
+        let idx = AuxDACFn::LGC;
+        let dac_idx = (idx as usize - 8usize) / 2usize;
+
+        if idx.is_lower() {
+            voltages.set_lower(dac_idx, vidx!(voltage));
+        } else {
+            voltages.set_upper(dac_idx, vidx!(voltage));
+        }
+
+        SetDAC::with_regs_unchecked(&DACMask::AUX1, &voltages, &DACVoltageMask::ALL)
+    }
+
+    /// Set values for the auxiliary DACs
     pub(crate) fn from_channels_aux(input: &[(AuxDACFn, f32)])
         -> Result<Vec<Self>, InstructionError> {
 
-        // This will hold at most 3 values, a SetDAC to clear, a DACRange
-        // and the actual SetDAC
-        let mut result: Vec<SetDAC> = Vec::with_capacity(3usize);
+        // This will hold at most 4 values, a SetDAC to clear, a DACRange
+        // and up to two actual SetDACs
+        let mut result: Vec<SetDAC> = Vec::with_capacity(4usize);
 
         // all AUX channels (except for LGC) live on AUX0
         let mask = DACMask::AUX0;
@@ -662,6 +680,12 @@ impl SetDAC {
                 AuxDACFn::CREF => {
                     cref = Some(*voltage)
                 },
+                AuxDACFn::LGC => {
+                    // If AuxDACFn::LGC is present make a new instruction
+                    // and add it; no need for further processing
+                    result.push(SetDAC::for_logic(*voltage));
+                    continue;
+                }
                 _ => {}
             }
 
