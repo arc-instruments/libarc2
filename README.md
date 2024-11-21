@@ -15,7 +15,7 @@ you can do so by adding the following to you `Cargo.toml`.
 
 ```toml
 [dependencies]
-libarc2 = "0.5"
+libarc2 = "0.6"
 ```
 
 The library is still under development and more features are added constantly.
