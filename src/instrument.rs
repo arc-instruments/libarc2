@@ -1797,7 +1797,7 @@ impl Instrument {
     /// of the connection (where current is sourced/sinked from/to). The static
     /// end of any DUT must be configured separately.
     pub fn config_current_source(&mut self, chans: &[usize], current: f32,
-        preset_range: bool) -> Result<&mut Self, ArC2Error> {
+        float: bool, preset_range: bool) -> Result<&mut Self, ArC2Error> {
 
         if current.is_nan() {
             return Err(ArC2Error::InvalidValue(current))
@@ -1806,10 +1806,12 @@ impl Instrument {
         let cvolt_base = current.signum()*10.0;
         if preset_range {
             let mut chanconf = ChannelConf::new();
-            // ensure that channels connected to the current source
-            // are floating
-            for c in chans {
-                chanconf.set(*c, ChannelState::Open);
+            if float {
+                // ensure that channels connected to the current source
+                // are floating
+                for c in chans {
+                    chanconf.set(*c, ChannelState::Open);
+                }
             }
             self.config_aux_channels(
                 &[(AuxDACFn::CSET, cvolt_base), (AuxDACFn::CREF, cvolt_base)])?;
